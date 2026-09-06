@@ -1,0 +1,20 @@
+{
+  "name": "@imagine/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@imagine/server": "workspace:*",
+    "effect": "4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsx": "latest",
+    "typescript": "^5.9.3"
+  }
+}

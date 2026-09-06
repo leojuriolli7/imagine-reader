@@ -7,12 +7,6 @@
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": [".next/**", "!.next/cache/**"]
     },
-    "lint": {
-      "dependsOn": ["^lint"]
-    },
-    "format": {
-      "dependsOn": ["^format"]
-    },
     "typecheck": {
       "dependsOn": ["^typecheck"]
     },
@@ -20,5 +14,20 @@
       "cache": false,
       "persistent": true
     }
-  }
+  },
+  "globalPassThroughEnv": [
+    "DATABASE_URL",
+    "BETTER_AUTH_*",
+    "SMTP_URL",
+    "EMAIL_FROM",
+    "AI_MODE",
+    "OPENAI_API_KEY",
+    "PLANNER_MODEL",
+    "IMAGE_MODEL",
+    "STORAGE_*",
+    "S3_*",
+    "AWS_*",
+    "PORT",
+    "NODE_ENV"
+  ]
 }

@@ -1,7 +1,8 @@
-import type { NextConfig } from "next"
+import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  transpilePackages: ["@workspace/ui"],
-}
+const config: NextConfig = {
+  transpilePackages: ["@workspace/ui", "@imagine/server"],
+  serverExternalPackages: ["pdfjs-dist", "postgres", "nodemailer"],
+};
 
-export default nextConfig
+export default config;

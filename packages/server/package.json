@@ -1,0 +1,36 @@
+{
+  "name": "@imagine/server",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./main/runtime": "./src/main/runtime.ts",
+    "./data/library": "./src/data/library.ts",
+    "./data/ports": "./src/data/ports.ts",
+    "./data/worker": "./src/data/worker.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "tsx src/main/migrate.ts",
+    "test:integration": "vitest run --root ../.. --config vitest.integration.config.ts",
+    "env:check": "tsx src/main/check-env.ts",
+    "storage:check": "tsx src/main/check-storage.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "latest",
+    "@effect/ai-openai": "4.0.0-rc.112",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/sql-pg": "4.0.0-rc.112",
+    "better-auth": "latest",
+    "effect": "4.0.0-rc.112",
+    "nodemailer": "latest",
+    "pdfjs-dist": "latest",
+    "pg": "8.23.0",
+    "@imagine/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/nodemailer": "latest",
+    "@types/pg": "8.23.1",
+    "typescript": "^5.9.3"
+  }
+}

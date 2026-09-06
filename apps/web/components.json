@@ -14,7 +14,7 @@
     "components": "@/components",
     "hooks": "@/hooks",
     "lib": "@/lib",
-    "utils": "@workspace/ui/lib/utils",
+    "utils": "cn",
     "ui": "@workspace/ui/components"
   },
   "rtl": false,

@@ -1,0 +1,12 @@
+{
+  "name": "@imagine/local-storage",
+  "private": true,
+  "scripts": {
+    "dev": "docker compose up",
+    "start": "docker compose up -d --wait",
+    "stop": "docker compose down",
+    "restart": "docker compose stop && docker compose up -d --wait",
+    "logs": "docker compose logs --follow",
+    "status": "docker compose ps"
+  }
+}

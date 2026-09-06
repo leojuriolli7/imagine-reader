@@ -1,0 +1,19 @@
+{
+  "name": "@imagine/contracts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/api.ts",
+    "./models": "./src/models.ts",
+    "./errors": "./src/errors.ts"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.112"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
