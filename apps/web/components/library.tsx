@@ -101,11 +101,6 @@ export function LibraryView({
             {[...books].reverse().map((book, index) => (
               <Link key={book.id} href={`/read/${book.id}`} className="group">
                 <Card className="overflow-hidden transition-colors hover:border-primary/40">
-                  <div
-                    className={`flex h-44 items-center justify-center ${index % 2 === 0 ? "bg-emerald-950/90 text-emerald-50" : "bg-stone-700 text-stone-50"}`}
-                  >
-                    <BookOpen className="size-12 stroke-1 opacity-80" />
-                  </div>
                   <CardContent className="space-y-3 pt-5">
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="font-serif text-xl">{book.title}</h2>

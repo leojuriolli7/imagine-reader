@@ -1,6 +1,7 @@
 import { Geist_Mono, Inter } from "next/font/google";
 
 import "@workspace/ui/globals.css";
+import { Toaster } from "@workspace/ui/components/sonner";
 import { cn } from "cn";
 import { QueryProvider } from "@/components/query-provider";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -31,6 +32,7 @@ export default function RootLayout({
       <body>
         <ThemeProvider>
           <QueryProvider>{children}</QueryProvider>
+          <Toaster closeButton />
         </ThemeProvider>
       </body>
     </html>

@@ -5,11 +5,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@workspace/ui/components/badge";
 import { Button } from "@workspace/ui/components/button";
 import { Input } from "@workspace/ui/components/input";
-import { ArrowLeft, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { keys, queries } from "@/lib/api";
 import { currentImage, validPage } from "@/lib/reading";
 
@@ -61,7 +62,7 @@ export function Reader({ initial }: { initial: BookView }) {
     onSuccess: () => client.invalidateQueries({ queryKey: keys.jobs(initial.id) }),
   });
 
-  const retry = () => retryMutation.mutate();
+  const { mutate: retry } = retryMutation;
 
   const error =
     bookQuery.error?.message ??
@@ -69,14 +70,61 @@ export function Reader({ initial }: { initial: BookView }) {
     progress.error?.message ??
     retryMutation.error?.message;
 
+  const progressFailed = progress.isError;
+
+  const retryFailed = retryMutation.isError;
+
   const image = currentImage(book, page);
 
   const failed = jobs.find((job) => job.status === "failed");
 
   const retrying = jobs.some((job) => job.status === "retrying");
 
+  const hasFailed = failed !== undefined;
+
+  const lastError = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!hasFailed) return;
+
+    const id = toast.error("Some pages couldn't be processed.", {
+      id: `processing:${initial.id}`,
+      duration: Infinity,
+      action: { label: "Retry", onClick: () => retry() },
+    });
+
+    return () => {
+      toast.dismiss(id);
+    };
+  }, [hasFailed, initial.id, retry]);
+
+  useEffect(() => {
+    if (!error || lastError.current === error) {
+      lastError.current = error;
+
+      return;
+    }
+
+    lastError.current = error;
+
+    toast.error("Couldn't save or refresh your reading session.", {
+      id: `reader:${initial.id}`,
+      action: {
+        label: "Retry",
+        onClick: () => {
+          lastError.current = undefined;
+          if (progressFailed) saveProgress(page);
+
+          if (retryFailed) retry();
+          void client.invalidateQueries({ queryKey: keys.book(initial.id) });
+          void client.invalidateQueries({ queryKey: keys.jobs(initial.id) });
+        },
+      },
+    });
+  }, [error, initial.id, page, saveProgress, client, progressFailed, retryFailed, retry]);
+
   return (
-    <div className="min-h-screen bg-muted/30">
+    <div className="min-h-dvh flex flex-col bg-muted/30">
       <header className="flex flex-wrap items-center justify-between gap-4 border-b bg-background px-6 py-4">
         <div className="flex min-w-0 items-center gap-4">
           <Link href="/library" aria-label="Back to library">
@@ -84,22 +132,23 @@ export function Reader({ initial }: { initial: BookView }) {
           </Link>
           <div>
             <h1 className="max-w-80 truncate font-serif text-xl">{book.title}</h1>
-            <p className="text-xs text-muted-foreground">Your place, your pace.</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          {book.mode === "demo" && <Badge variant="secondary">Demo mode</Badge>}
-          <Link
-            className="text-xs text-muted-foreground underline"
-            href={`/api/books/${book.id}/inspect`}
-            target="_blank"
-          >
-            Inspect plan
-          </Link>
-        </div>
+        {process.env.NODE_ENV === "development" && (
+          <div className="flex items-center gap-3">
+            {book.mode === "demo" && <Badge variant="secondary">Demo mode</Badge>}
+            <Link
+              className="text-xs text-muted-foreground underline"
+              href={`/api/books/${book.id}/inspect`}
+              target="_blank"
+            >
+              Inspect plan
+            </Link>
+          </div>
+        )}
       </header>
-      <main className="mx-auto grid grid-cols-1 max-w-7xl gap-8 px-4 py-7 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.8fr)]">
-        <section className="min-w-0">
+      <main className="relative mx-auto flex w-full max-w-[792px] flex-1 flex-col gap-6 px-4 py-6 min-[1440px]:max-w-[672px]">
+        <section className="min-w-0 flex-1">
           <nav className="mb-5 flex items-center justify-center gap-3" aria-label="Page navigation">
             <Button
               size="icon"
@@ -138,15 +187,12 @@ export function Reader({ initial }: { initial: BookView }) {
             <PdfPage id={book.id} page={page} onLoaded={onLoaded} />
           </div>
         </section>
-        <aside className="min-w-0 lg:sticky lg:top-6 lg:self-start">
-          <div className="mb-5 flex items-center justify-between">
-            <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-widest">
-              <Sparkles className="size-4" />
-              The world of your story
-            </p>
-          </div>
-          {image ? (
-            <div className="overflow-hidden rounded-2xl border bg-background">
+        {image && (
+          <aside
+            aria-label="Scene illustration"
+            className="w-full min-[1440px]:absolute min-[1440px]:left-full min-[1440px]:top-[84px] min-[1440px]:w-[min(360px,calc((100vw-672px)/2-24px))]"
+          >
+            <div className="overflow-hidden rounded-xl border bg-background">
               <Image
                 width={1024}
                 height={1024}
@@ -154,25 +200,12 @@ export function Reader({ initial }: { initial: BookView }) {
                 key={image.id}
                 src={`/api/books/${book.id}/images/${encodeURIComponent(image.id)}`}
                 alt="Illustration of the current scene in your book"
-                className="aspect-square w-full object-cover"
+                className="h-auto w-full"
               />
-
-              {book.mode === "demo" && (
-                <p className="px-5 py-4 text-xs text-muted-foreground">
-                  Demo fixture · no AI image generated
-                </p>
-              )}
             </div>
-          ) : (
-            <div className="flex aspect-square flex-col items-center justify-center rounded-2xl border border-dashed bg-background/60 p-10 text-center">
-              <Sparkles className="mb-5 size-8 text-muted-foreground/60" />
-              <h2 className="font-serif text-2xl">Room for your imagination.</h2>
-              <p className="mt-3 max-w-xs text-sm leading-relaxed text-muted-foreground">
-                Illustrations appear when the story calls for them. Keep reading while we prepare
-                what’s ahead.
-              </p>
-            </div>
-          )}
+          </aside>
+        )}
+        {process.env.NODE_ENV === "development" && (
           <div className="mt-5 space-y-3 text-xs text-muted-foreground" aria-live="polite">
             <p>
               {book.status === "extracting"
@@ -193,14 +226,11 @@ export function Reader({ initial }: { initial: BookView }) {
                 <p className="mb-3">
                   {failed.error ?? "Illustration processing needs another try."}
                 </p>
-                <Button size="sm" variant="outline" onClick={retry}>
-                  Retry processing
-                </Button>
               </div>
             )}
             {error && <p role="alert">{error}</p>}
           </div>
-        </aside>
+        )}
       </main>
     </div>
   );
