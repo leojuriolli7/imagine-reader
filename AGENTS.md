@@ -16,6 +16,7 @@ Use the exact installed Effect 4 APIs. Do not mix documentation from other relea
 - Keep trace context on durable jobs. Provide observability to the runtime and HTTP context; verify cross-process parentage after changing composition.
 - Keep the independent local S3 service in packages/local-storage. No API dependency on that package.
 - Decode external data; do not cast it into trusted types or fabricate test doubles with assertions.
+- Use shadcn semantic color tokens in UI classes; keep palette values in the theme definitions.
 - Separate logical blocks and functions with blank lines. Explain non-obvious invariants with concise JSDoc.
 - Keep tests for observable behavior: ownership, transactions, timelines, resource cleanup, and retry decisions. No compatibility paths or historical implementation tests.
 - Run pnpm check and the appropriate integration tests. Use plain pnpm commands.

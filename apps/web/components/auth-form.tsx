@@ -13,7 +13,7 @@ import { Field, FieldDescription, FieldLabel } from "@workspace/ui/components/fi
 import { Input } from "@workspace/ui/components/input";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
-import { authClient } from "@/lib/auth-client";
+import { authMutations } from "@/lib/auth-options";
 
 export function AuthForm() {
   const router = useRouter();
@@ -21,7 +21,7 @@ export function AuthForm() {
   const [mode, setMode] = useState<"login" | "signup" | "reset">("login");
 
   const mutation = useMutation({
-    mutationFn: (data: FormData) => submitAuth(mode, data),
+    ...authMutations.submit(mode),
     onSuccess: (notice) => {
       if (!notice) {
         router.push("/library");
@@ -52,17 +52,32 @@ export function AuthForm() {
           {mode === "signup" && (
             <Field>
               <FieldLabel htmlFor="name">Name</FieldLabel>
-              <Input id="name" name="name" autoComplete="name" required maxLength={100} />
+              <Input
+                placeholder="Type a name..."
+                id="name"
+                name="name"
+                autoComplete="name"
+                required
+                maxLength={100}
+              />
             </Field>
           )}
           <Field>
             <FieldLabel htmlFor="email">Email</FieldLabel>
-            <Input id="email" name="email" type="email" autoComplete="email" required />
+            <Input
+              placeholder="Type an email..."
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+            />
           </Field>
           {mode !== "reset" && (
             <Field>
               <FieldLabel htmlFor="password">Password</FieldLabel>
               <Input
+                placeholder="Type a password..."
                 id="password"
                 name="password"
                 type="password"
@@ -113,27 +128,3 @@ const labels = {
   signup: { title: "Begin your next chapter", submit: "Create account" },
   reset: { title: "Reset your password", submit: "Send reset link" },
 };
-
-async function submitAuth(mode: keyof typeof labels, data: FormData) {
-  const email = String(data.get("email"));
-
-  const password = String(data.get("password") ?? "");
-
-  const actions = {
-    login: () => authClient.signIn.email({ email, password, callbackURL: "/library" }),
-    signup: () =>
-      authClient.signUp.email({
-        email,
-        password,
-        name: String(data.get("name")),
-        callbackURL: "/library",
-      }),
-    reset: () => authClient.requestPasswordReset({ email, redirectTo: "/reset-password" }),
-  };
-
-  const result = await actions[mode]();
-
-  if (result.error) throw new Error(result.error.message);
-
-  return mode === "reset" ? "If this email has an account, a reset link is on its way." : null;
-}

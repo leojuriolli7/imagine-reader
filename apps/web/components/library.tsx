@@ -1,19 +1,34 @@
 "use client";
 
 import type { BookView } from "@imagine/contracts/models";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@workspace/ui/components/badge";
 import { Button } from "@workspace/ui/components/button";
 import { Card, CardContent } from "@workspace/ui/components/card";
 import { Field, FieldDescription, FieldLabel } from "@workspace/ui/components/field";
 import { Input } from "@workspace/ui/components/input";
-import { Schema } from "effect";
-import { ArrowUpRight, BookOpen, LogOut, Upload } from "lucide-react";
+import { ArrowUpRight, BookOpen, LogOut, Plus, MoreHorizontal, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent } from "react";
-import { keys, queries } from "@/lib/api";
-import { authClient } from "@/lib/auth-client";
+import { type FormEvent, useState } from "react";
+import { toast } from "sonner";
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@workspace/ui/components/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@workspace/ui/components/dropdown-menu";
+import { mutations, queries } from "@/lib/api";
+import { authMutations } from "@/lib/auth-options";
+import { ThemeMenu } from "./theme-menu";
 import { Brand } from "./brand";
 
 export function LibraryView({
@@ -25,23 +40,29 @@ export function LibraryView({
 }) {
   const router = useRouter();
 
+  const client = useQueryClient();
+
+  const [adding, setAdding] = useState(false);
+
   const list = useQuery({
-    queryKey: keys.library,
-    queryFn: ({ signal }) => queries.list(signal),
+    ...queries.list(),
     initialData: initialBooks,
   });
 
   const books = list.data;
 
   const uploadMutation = useMutation({
-    mutationFn: (form: FormData) => {
-      const file = Schema.decodeUnknownSync(Schema.instanceOf(File))(form.get("file"));
-
-      const title = String(form.get("title") || file.name.replace(/\.pdf$/i, ""));
-
-      return queries.upload(file, title);
-    },
+    ...mutations.upload(),
     onSuccess: (book) => router.push(`/read/${book.id}`),
+  });
+
+  const removeMutation = useMutation({
+    ...mutations.remove(),
+    onSuccess: () => client.invalidateQueries(queries.list()),
+    onError: (_error, id) =>
+      toast.error("Couldn't finish deleting this book.", {
+        action: { label: "Retry", onClick: () => removeMutation.mutate(id) },
+      }),
   });
 
   const busy = uploadMutation.isPending;
@@ -55,8 +76,10 @@ export function LibraryView({
   };
 
   const logoutMutation = useMutation({
-    mutationFn: () => authClient.signOut(),
+    ...authMutations.signOut(),
     onSuccess: () => {
+      client.clear();
+
       router.push("/login");
 
       router.refresh();
@@ -69,10 +92,13 @@ export function LibraryView({
     <>
       <header className="flex items-center justify-between border-b px-6 py-5 md:px-12">
         <Brand />
-        <Button variant="ghost" onClick={logout}>
-          <LogOut />
-          Sign out
-        </Button>
+        <div className="flex items-center gap-2">
+          <ThemeMenu />
+          <Button variant="ghost" onClick={logout}>
+            <LogOut />
+            Sign out
+          </Button>
+        </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-14">
         <div className="mb-12 flex flex-wrap items-end justify-between gap-4">
@@ -82,51 +108,28 @@ export function LibraryView({
             </p>
             <h1 className="font-serif text-5xl">Your library</h1>
           </div>
-          <Badge variant="outline">
-            {books.length} {books.length === 1 ? "book" : "books"}
-          </Badge>
-        </div>
-        <div className="grid gap-8 lg:grid-cols-[1fr_340px]">
-          <section className="grid content-start gap-5 sm:grid-cols-2">
-            {books.length === 0 && (
-              <div className="col-span-full flex min-h-80 flex-col items-center justify-center rounded-2xl border border-dashed bg-muted/20 p-8 text-center">
-                <BookOpen className="mb-5 size-10 text-muted-foreground" />
-                <h2 className="font-serif text-2xl">Every world starts with a page.</h2>
-                <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                  Upload your first book and start reading. We’ll prepare the illustrations as you
-                  go.
-                </p>
-              </div>
-            )}
-            {[...books].reverse().map((book, index) => (
-              <Link key={book.id} href={`/read/${book.id}`} className="group">
-                <Card className="overflow-hidden transition-colors hover:border-primary/40">
-                  <CardContent className="space-y-3 pt-5">
-                    <div className="flex items-start justify-between gap-3">
-                      <h2 className="font-serif text-xl">{book.title}</h2>
-                      <ArrowUpRight className="size-4 shrink-0" />
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {book.pageCount
-                        ? `Page ${book.currentPage} of ${book.pageCount}`
-                        : "Ready to open · preparing illustrations"}
-                    </p>
-                    {book.mode === "demo" && <Badge variant="secondary">Demo illustrations</Badge>}
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </section>
-          <aside>
-            <Card>
-              <CardContent className="space-y-5 pt-6">
-                <Upload className="size-6" />
-                <div>
-                  <h2 className="text-lg font-medium">Bring your own book</h2>
-                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    Open page one while we plan the next fifty.
-                  </p>
-                </div>
+          <div className="flex items-center gap-3">
+            <Badge variant="outline">
+              {books.length} {books.length === 1 ? "book" : "books"}
+            </Badge>
+            <Dialog
+              open={adding}
+              onOpenChange={(open) => {
+                if (!busy) {
+                  setAdding(open);
+                  uploadMutation.reset();
+                }
+              }}
+            >
+              <DialogTrigger render={<Button />}>
+                <Plus />
+                Add new book
+              </DialogTrigger>
+              <DialogContent showCloseButton={!busy}>
+                <DialogHeader>
+                  <DialogTitle>Add new book</DialogTitle>
+                  <DialogDescription>Choose a PDF from your device.</DialogDescription>
+                </DialogHeader>
                 <form onSubmit={upload} className="space-y-5">
                   <Field>
                     <FieldLabel htmlFor="file">PDF file</FieldLabel>
@@ -165,13 +168,71 @@ export function LibraryView({
                     <ArrowUpRight />
                   </Button>
                 </form>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Your library is private. In AI mode, relevant book passages are sent to the
-                  configured AI provider.
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+        {list.error && (
+          <p role="alert" className="mb-4 text-destructive">
+            Couldn’t refresh your library. Please try again.
+          </p>
+        )}
+        <div>
+          <section className="grid content-start gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {books.length === 0 && (
+              <div className="col-span-full flex min-h-80 flex-col items-center justify-center rounded-2xl border border-dashed bg-muted/20 p-8 text-center">
+                <BookOpen className="mb-5 size-10 text-muted-foreground" />
+
+                <h2 className="font-serif text-2xl">Every world starts with a page.</h2>
+
+                <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground">
+                  Upload your first book and start reading. We'll take care of the visuals.
                 </p>
-              </CardContent>
-            </Card>
-          </aside>
+              </div>
+            )}
+            {[...books].reverse().map((book) => (
+              <Card
+                key={book.id}
+                className="overflow-hidden transition-colors hover:border-primary/40"
+              >
+                <CardContent className="space-y-3 pt-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <Link href={`/read/${book.id}`} className="min-w-0 flex-1 hover:underline">
+                      <h2 className="break-words font-serif text-xl">{book.title}</h2>
+                    </Link>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Actions for ${book.title}`}
+                          />
+                        }
+                      >
+                        <MoreHorizontal />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          variant="destructive"
+                          disabled={removeMutation.isPending}
+                          onClick={() => removeMutation.mutate(book.id)}
+                        >
+                          <Trash2 />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {book.pageCount
+                      ? `Page ${book.currentPage} of ${book.pageCount}`
+                      : "Ready to open"}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </section>
         </div>
       </main>
     </>

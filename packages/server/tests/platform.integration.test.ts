@@ -75,6 +75,50 @@ layer(TestApp, { timeout: "30 seconds", excludeTestServices: true })("platform s
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("deletes only owned books, cancels jobs and resumes interrupted cleanup", () =>
+    Effect.gen(function* () {
+      const library = yield* Library;
+
+      const repo = yield* BookRepository;
+
+      const storage = yield* BlobStorage;
+
+      const queue = yield* JobQueue;
+
+      const book = yield* library.upload(
+        testOwner,
+        "Delete me",
+        new TextEncoder().encode("%PDF-test"),
+      );
+
+      yield* library.remove("another-reader", book.id);
+
+      assert.isNotNull(yield* repo.get(book.id));
+
+      // Simulate a request interrupted after fencing writers and removing an object.
+      yield* repo.beginDeletion(testOwner, book.id);
+
+      assert.isNull(yield* repo.get(book.id));
+      assert.deepStrictEqual(yield* queue.status(book.id), []);
+      assert.strictEqual(
+        (yield* repo
+          .change(book.id, (current) => Effect.succeed({ book: current, jobs: [] }))
+          .pipe(Effect.flip))._tag,
+        "NotFound",
+      );
+
+      yield* storage.remove(book.storageKey);
+      yield* library.remove(testOwner, book.id);
+      yield* library.remove(testOwner, book.id);
+
+      assert.isFalse((yield* library.list(testOwner)).some((entry) => entry.id === book.id));
+      assert.strictEqual(
+        (yield* storage.get(book.storageKey).pipe(Effect.flip)).reason,
+        "not-found",
+      );
+    }),
+  );
+
   it.effect("rolls back failed state and outbox updates", () =>
     Effect.gen(function* () {
       const library = yield* Library;

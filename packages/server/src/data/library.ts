@@ -114,6 +114,22 @@ const library = Effect.gen(function* () {
     );
   });
 
+  const remove = Effect.fn("Library.remove")(function* (owner: string, id: string) {
+    const book = yield* books.beginDeletion(owner, id);
+
+    // Missing and foreign books both succeed without revealing ownership.
+    if (!book) return;
+
+    const keys = [
+      book.storageKey,
+      ...book.illustrations.flatMap((image) => (image.artifact ? [image.artifact.key] : [])),
+    ];
+
+    yield* Effect.forEach(keys, (key) => storage.remove(key), { concurrency: 4 });
+
+    yield* books.finishDeletion(owner, id);
+  });
+
   const retry = Effect.fn("Library.retry")(function* (owner: string, id: string) {
     yield* owned(owner, id);
 
@@ -142,7 +158,7 @@ const library = Effect.gen(function* () {
     return { bytes: yield* storage.get(image.artifact.key), mediaType: image.artifact.mediaType };
   });
 
-  return { owned, upload, progress, retry, jobs, file, image, list: books.list };
+  return { owned, upload, progress, remove, retry, jobs, file, image, list: books.list };
 });
 
 export class Library extends Context.Service<Library, Effect.Success<typeof library>>()(

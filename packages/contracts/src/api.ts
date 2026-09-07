@@ -58,6 +58,11 @@ class BooksApi extends HttpApiGroup.make("books")
       success: BookView,
       error: errors,
     }),
+    HttpApiEndpoint.delete("remove", "/api/books/:id", {
+      params: { id: Id },
+      success: Schema.Void,
+      error: errors,
+    }),
     HttpApiEndpoint.post("progress", "/api/books/:id/progress", {
       params: { id: Id },
       payload: Schema.Struct({ page: Page }),

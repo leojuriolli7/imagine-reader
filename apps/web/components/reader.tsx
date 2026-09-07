@@ -11,7 +11,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { keys, queries } from "@/lib/api";
+import { mutations, queries } from "@/lib/api";
+import { ThemeMenu } from "./theme-menu";
 import { currentImage, validPage } from "@/lib/reading";
 
 const PdfPage = dynamic(() => import("./pdf-page"), { ssr: false });
@@ -20,15 +21,13 @@ export function Reader({ initial }: { initial: BookView }) {
   const client = useQueryClient();
 
   const bookQuery = useQuery({
-    queryKey: keys.book(initial.id),
-    queryFn: ({ signal }) => queries.book(initial.id, signal),
+    ...queries.book(initial.id),
     initialData: initial,
     refetchInterval: 2000,
   });
 
   const jobsQuery = useQuery({
-    queryKey: keys.jobs(initial.id),
-    queryFn: ({ signal }) => queries.jobs(initial.id, signal),
+    ...queries.jobs(initial.id),
     refetchInterval: 2000,
   });
 
@@ -42,24 +41,21 @@ export function Reader({ initial }: { initial: BookView }) {
 
   const onLoaded = useCallback((count: number) => setPages(count), []);
 
-  const progress = useMutation({
-    mutationFn: (page: number) => queries.progress(initial.id, page),
-    scope: { id: `progress:${initial.id}` },
-  });
+  const progress = useMutation(mutations.progress(initial.id));
 
   const { mutate: saveProgress } = progress;
 
   useEffect(() => {
     if (book.status !== "ready") return;
 
-    const timer = setTimeout(() => saveProgress(page), 250);
+    const timer = setTimeout(() => saveProgress(page), 3000);
 
     return () => clearTimeout(timer);
   }, [page, book.status, saveProgress]);
 
   const retryMutation = useMutation({
-    mutationFn: () => queries.retry(initial.id),
-    onSuccess: () => client.invalidateQueries({ queryKey: keys.jobs(initial.id) }),
+    ...mutations.retry(initial.id),
+    onSuccess: () => client.invalidateQueries(queries.jobs(initial.id)),
   });
 
   const { mutate: retry } = retryMutation;
@@ -116,8 +112,8 @@ export function Reader({ initial }: { initial: BookView }) {
           if (progressFailed) saveProgress(page);
 
           if (retryFailed) retry();
-          void client.invalidateQueries({ queryKey: keys.book(initial.id) });
-          void client.invalidateQueries({ queryKey: keys.jobs(initial.id) });
+          void client.invalidateQueries(queries.book(initial.id));
+          void client.invalidateQueries(queries.jobs(initial.id));
         },
       },
     });
@@ -134,18 +130,21 @@ export function Reader({ initial }: { initial: BookView }) {
             <h1 className="max-w-80 truncate font-serif text-xl">{book.title}</h1>
           </div>
         </div>
-        {process.env.NODE_ENV === "development" && (
-          <div className="flex items-center gap-3">
-            {book.mode === "demo" && <Badge variant="secondary">Demo mode</Badge>}
-            <Link
-              className="text-xs text-muted-foreground underline"
-              href={`/api/books/${book.id}/inspect`}
-              target="_blank"
-            >
-              Inspect plan
-            </Link>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {process.env.NODE_ENV === "development" && (
+            <div className="flex items-center gap-3">
+              {book.mode === "demo" && <Badge variant="secondary">Demo mode</Badge>}
+              <Link
+                className="text-xs text-muted-foreground underline"
+                href={`/api/books/${book.id}/inspect`}
+                target="_blank"
+              >
+                Inspect plan
+              </Link>
+            </div>
+          )}
+          <ThemeMenu />
+        </div>
       </header>
       <main className="relative mx-auto flex w-full max-w-[792px] flex-1 flex-col gap-6 px-4 py-6 min-[1440px]:max-w-[672px]">
         <section className="min-w-0 flex-1">
@@ -183,7 +182,7 @@ export function Reader({ initial }: { initial: BookView }) {
               <ChevronRight />
             </Button>
           </nav>
-          <div className="mx-auto max-w-[760px] overflow-hidden rounded-sm bg-white shadow-sm">
+          <div className="mx-auto max-w-[760px] overflow-hidden rounded-sm bg-background shadow-sm">
             <PdfPage id={book.id} page={page} onLoaded={onLoaded} />
           </div>
         </section>

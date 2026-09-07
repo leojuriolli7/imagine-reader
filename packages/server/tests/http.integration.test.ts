@@ -147,5 +147,9 @@ it.live("runs an HTTP upload through the worker and serves its illustration", ()
     assert.strictEqual(image.status, 200);
 
     assert.strictEqual(image.headers.get("content-type"), "image/svg+xml");
+
+    assert.strictEqual((yield* request(`/api/books/${book.id}`, { method: "DELETE" })).status, 200);
+    assert.strictEqual((yield* request(`/api/books/${book.id}`)).status, 404);
+    assert.strictEqual((yield* request(`/api/books/${book.id}/file`)).status, 404);
   }),
 );

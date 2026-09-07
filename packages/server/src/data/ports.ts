@@ -75,6 +75,8 @@ export class BookRepository extends Context.Service<
   BookRepository,
   {
     create(book: Book, jobs: readonly JobSpec[]): Effect.Effect<void, DatabaseError>;
+    beginDeletion(owner: string, id: string): Effect.Effect<Book | null, DatabaseError>;
+    finishDeletion(owner: string, id: string): Effect.Effect<void, DatabaseError>;
     get(id: string): Effect.Effect<Book | null, DatabaseError>;
     list(owner: string): Effect.Effect<readonly Book[], DatabaseError>;
     change<E extends InvalidInput | Conflict | NotFound>(

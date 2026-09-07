@@ -4,6 +4,11 @@ import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
 export const migrations = PgMigrator.fromRecord({
+  "004_book_deletion": Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+
+    yield* sql`ALTER TABLE books ADD COLUMN deleted_at timestamptz`;
+  }),
   "003_reading_workflow": Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const source = yield* Effect.sync(() =>

@@ -60,11 +60,28 @@ export const RepositoryLive = Layer.effect(
             ),
           ),
       ),
+      /** Retain object references until cleanup succeeds, allowing DELETE to be retried. */
+      beginDeletion: Effect.fn("Books.beginDeletion")(function* (owner, id) {
+        const rows =
+          yield* sql`WITH removed AS (UPDATE books SET deleted_at = COALESCE(deleted_at, now()) WHERE id = ${id} AND owner_id = ${owner} RETURNING state, id), cancelled AS (DELETE FROM jobs USING removed WHERE jobs.book_id = removed.id) SELECT state FROM removed`.pipe(
+            Effect.flatMap(decodeStates),
+            Effect.mapError(databaseFailure("begin deletion")),
+          );
+
+        return rows[0]?.state ?? null;
+      }),
+      finishDeletion: Effect.fn("Books.finishDeletion")((owner, id) =>
+        sql`DELETE FROM books WHERE id = ${id} AND owner_id = ${owner} AND deleted_at IS NOT NULL`.pipe(
+          Effect.asVoid,
+          Effect.mapError(databaseFailure("finish deletion")),
+        ),
+      ),
       get: Effect.fn("Books.get")(function* (id) {
-        const rows = yield* sql`SELECT state FROM books WHERE id = ${id}`.pipe(
-          Effect.flatMap(decodeStates),
-          Effect.mapError(databaseFailure("get")),
-        );
+        const rows =
+          yield* sql`SELECT state FROM books WHERE id = ${id} AND deleted_at IS NULL`.pipe(
+            Effect.flatMap(decodeStates),
+            Effect.mapError(databaseFailure("get")),
+          );
 
         return rows[0]?.state ?? null;
       }),
@@ -89,9 +106,10 @@ export const RepositoryLive = Layer.effect(
                   return yield* new Conflict({ message: "Worker lease expired." });
               }
 
-              const rows = yield* sql`SELECT state FROM books WHERE id = ${id} FOR UPDATE`.pipe(
-                Effect.flatMap(decodeStates),
-              );
+              const rows =
+                yield* sql`SELECT state FROM books WHERE id = ${id} AND deleted_at IS NULL FOR UPDATE`.pipe(
+                  Effect.flatMap(decodeStates),
+                );
 
               const row = rows[0];
 

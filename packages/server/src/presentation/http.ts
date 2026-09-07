@@ -98,6 +98,11 @@ export const BooksHandlers = HttpApiBuilder.group(
           .progress(reader.id, params.id, payload.page)
           .pipe(Effect.mapError(publicError));
       }),
+      remove: Effect.fn(function* ({ params }) {
+        const reader = yield* CurrentReader;
+
+        yield* library.remove(reader.id, params.id).pipe(Effect.mapError(publicError));
+      }),
       retry: Effect.fn(function* ({ params }) {
         const reader = yield* CurrentReader;
 
