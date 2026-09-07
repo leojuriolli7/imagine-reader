@@ -16,5 +16,14 @@ services:
   mailpit:
     image: axllent/mailpit:v1.27
     ports: ["127.0.0.1:58025:8025", "127.0.0.1:51025:1025"]
+  collector:
+    image: otel/opentelemetry-collector:0.153.0
+    user: "0:0"
+    command: ["--config=/etc/otelcol/config.yaml"]
+    ports: ["127.0.0.1:4318:4318"]
+    volumes:
+      - ./collector.yaml:/etc/otelcol/config.yaml:ro
+      - ../.data/telemetry:/data
+    mem_limit: 192m
 volumes:
   postgres_data:

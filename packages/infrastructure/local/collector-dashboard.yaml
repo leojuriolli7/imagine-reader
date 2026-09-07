@@ -1,0 +1,15 @@
+exporters:
+  otlphttp/dashboard:
+    endpoint: http://host.docker.internal:54318
+    retry_on_failure:
+      enabled: false
+    sending_queue:
+      enabled: false
+service:
+  pipelines:
+    traces:
+      exporters: [file/traces, otlphttp/dashboard]
+    logs:
+      exporters: [file/logs, otlphttp/dashboard]
+    metrics:
+      exporters: [file/metrics, otlphttp/dashboard]

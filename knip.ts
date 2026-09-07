@@ -22,7 +22,7 @@ export default function configuration({ production }: { production?: boolean }) 
       "packages/ui": {
         includeEntryExports: true,
       },
-      "packages/local-observability": { entry: production ? ["src/inspect.ts!"] : [] },
+      "packages/infrastructure": { entry: production ? ["src/local.ts!", "src/inspect.ts!"] : [] },
       "packages/typescript-config": {
         ignoreUnresolved: ["next"],
       },

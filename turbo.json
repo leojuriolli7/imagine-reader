@@ -28,6 +28,7 @@
     "S3_*",
     "AWS_*",
     "PORT",
-    "NODE_ENV"
+    "NODE_ENV",
+    "OTEL_*"
   ]
 }

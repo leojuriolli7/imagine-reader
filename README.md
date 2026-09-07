@@ -11,10 +11,9 @@ Requires Node 22.13+, pnpm 10.33.4, and Docker Desktop running.
 ```sh
 pnpm install
 pnpm local:up
-pnpm dev
 ```
 
-`local:up` creates `.env` with a random auth secret when missing, starts PostgreSQL, Mailpit, the separate S3 service and local telemetry, applies SQL migrations, and validates configuration and storage. `dev` runs web and worker together.
+`local:up` creates `.env` when missing, starts PostgreSQL, Mailpit, independent S3 and a lightweight OTLP collector, migrates and validates, then runs web/API and worker with hot reload in the foreground. Ctrl+C shuts down the session and its containers. `pnpm local:down` also stops that session from another terminal. Existing `.env` settings are preserved.
 
 | Service | Address |
 | --- | --- |
@@ -24,7 +23,7 @@ pnpm dev
 | SMTP | localhost:51025 |
 | PostgreSQL | localhost:55432 |
 | S3 | http://localhost:58333 |
-| Grafana traces, logs and metrics | http://localhost:53000 |
+| Optional Grafana (`pnpm telemetry:dashboard`) | http://localhost:53000 |
 | OTLP HTTP collector | http://localhost:4318 |
 
 Register an account, upload a PDF with selectable text, and start reading. Limits: 25 MB, 2,000 pages, 5 million extracted characters, and 24,000 characters per page. Scanned PDFs require OCR before upload.
@@ -78,7 +77,7 @@ packages/server/src
   presentation           HttpApi handlers and authentication middleware
   main                   Layers, host runtime, telemetry and operational commands
 packages/local-storage   Independent local S3 service
-packages/local-observability  Independent local OTLP collector and Grafana stack
+packages/infrastructure  Local orchestration, collector, optional dashboards and inspection CLI
 packages/ui              Shared shadcn components
 ```
 
@@ -104,7 +103,7 @@ pnpm build
 
 Knip checks unused files, exports and dependencies in both normal and production graphs, catching code referenced only by tests. Oxlint and vendored anti-slop rules check application code. Biome handles formatting. Vitest and `@effect/vitest` exercise domain behavior and real service boundaries. Effect versions and Oxlint/plugin versions are pinned together. Read `AGENTS.md` before changing Effect code.
 
-Effect exports traces, correlated logs and worker metrics to the local Grafana stack. Open http://localhost:53000 (admin / admin), then Explore → Tempo for traces or Loki for logs. Configuration:
+Effect exports traces, correlated logs and worker metrics to a lightweight collector. It writes rotating files under `packages/infrastructure/.data/telemetry`; no dashboards start by default. Run `pnpm telemetry:dashboard` for Grafana at http://localhost:53000 (admin / admin). Configuration:
 
 ```dotenv
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
@@ -116,10 +115,10 @@ Durable jobs retain their trace context: API upload → SQL/outbox → worker ex
 ```sh
 pnpm telemetry:traces
 pnpm telemetry:trace <trace-id>
-pnpm telemetry:events
+pnpm telemetry:events --follow
 ```
 
-These read-only JSON commands let an agent inspect the running service without adding debug endpoints to the API. Export happens about once per second; Tempo search indexing can lag, while direct trace-ID lookup is available sooner. Leave the endpoint blank to disable export. In deployment, point both hosts at your OTLP HTTP collector and optionally use separate `OTEL_SERVICE_NAME` values for web and worker.
+These read-only JSON commands let an agent inspect the running service without adding debug endpoints to the API. Export and collector batching each take about a second. Inspection reads retained files, including rotated files; a trace can be incomplete while running or after retention expires. Leave the endpoint blank to disable export. In deployment, point both hosts at your OTLP HTTP collector and optionally use separate `OTEL_SERVICE_NAME` values for web and worker.
 
 See [observability](docs/observability.md) for queries and deployment, [environment](docs/environment.md) for settings, and [testing](docs/testing.md) for verification.
 
@@ -128,12 +127,13 @@ See [observability](docs/observability.md) for queries and deployment, [environm
 | Command | Purpose |
 | --- | --- |
 | `pnpm local:setup` | Create local `.env` when missing |
-| `pnpm local:up` | Start infrastructure, migrate and validate |
+| `pnpm local:up` / `pnpm local:down` | Start/stop the complete foreground local session |
 | `pnpm dev` | Web and worker development processes |
 | `pnpm dev:web` / `pnpm dev:worker` | Start one development host |
 | `pnpm services:up` / `pnpm services:down` | Start/stop all local infrastructure |
 | `pnpm storage:start` / `pnpm storage:stop` | Start/stop only S3 |
-| `pnpm telemetry:start` / `pnpm telemetry:stop` | Start/stop the local telemetry stack |
+| `pnpm telemetry:start` / `pnpm telemetry:stop` | Start/stop only the lightweight collector |
+| `pnpm telemetry:dashboard` / `pnpm telemetry:dashboard:stop` | Enable/disable optional dashboards |
 | `pnpm telemetry:traces` / `pnpm telemetry:trace <id>` | Inspect recent traces / a full call tree |
 | `pnpm telemetry:events` / `pnpm telemetry:logs` | Query application logs / follow collector logs |
 | `pnpm storage:restart` / `pnpm storage:logs` | Restart/inspect S3 |
@@ -148,7 +148,7 @@ See [observability](docs/observability.md) for queries and deployment, [environm
 | `pnpm deploy:prepare` | Validate settings/storage, check and build |
 | `pnpm start:web` / `pnpm start:worker` | Start deployed hosts |
 
-To stop local development, press Ctrl+C in the dev terminal, then `pnpm services:down`. Named volumes preserve uploaded files and database records.
+For `pnpm local:up`, Ctrl+C or `pnpm local:down` stops the managed session. Alternatively, `pnpm services:up` and `pnpm dev` can be run separately; stop that separate dev terminal with Ctrl+C before `pnpm services:down`. Named volumes preserve uploaded files and database records. AWS infrastructure code is deferred until separately approved.
 
 ## Deploy
 

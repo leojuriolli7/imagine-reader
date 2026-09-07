@@ -4,18 +4,26 @@ The application exports Effect-native OTLP/HTTP JSON. `ObservabilityLive` wires 
 
 ## Local use
 
-`pnpm local:up` includes `packages/local-observability`, an independent Docker Compose project using pinned `grafana/otel-lgtm:0.32.1`. PostgreSQL and S3 do not depend on it. The package exposes:
+`pnpm local:up` starts the core OpenTelemetry Collector, not Grafana LGTM. It accepts OTLP HTTP on `127.0.0.1:4318` and writes JSONL traces, logs and metrics to `packages/infrastructure/.data/telemetry`.
+
+Each signal rotates at 5 MB, retaining at most two backups plus the active file (roughly 45 MB across three signals). Rotated files have a one-day retention setting; expiry cleanup occurs during rotation, not on a scheduled timer. The active file can contain older data. This is bounded local diagnostic storage, not a durable archive. Partial final records are ignored until the collector finishes writing them.
+
+The collector container has a 192 MB memory limit and a 128 MB memory limiter. Ports bind to loopback. The container runs as root only to write the local bind mount consistently across Docker hosts; it has no Docker socket or application filesystem access.
+
+`pnpm telemetry:start`, `pnpm telemetry:stop`, `pnpm telemetry:status`, and `pnpm telemetry:logs` manage the collector. A blank `OTEL_EXPORTER_OTLP_ENDPOINT` disables application export. Exporters are best-effort: unavailable telemetry does not fail application requests, and dropped telemetry is not replayed.
+
+### Optional dashboards
+
+Run `pnpm telemetry:dashboard` to start the separate pinned Grafana LGTM image and enable collector forwarding. The app endpoint remains `http://localhost:4318`; no app restart is needed. Existing local files are not replayed into the dashboard. New data continues to be saved locally as well as forwarded.
 
 | Address | Purpose |
 | --- | --- |
-| http://localhost:53000 | Grafana, credentials admin / admin |
-| http://localhost:4318 | OTLP HTTP ingestion |
+| http://localhost:53000 | Grafana, admin / admin |
 | http://localhost:53200 | Tempo query API |
 | http://localhost:53100 | Loki query API |
+| http://localhost:54318 | Dashboard OTLP ingestion, used by the collector |
 
-All ports bind to loopback. The named volume retains telemetry when stopped. `pnpm telemetry:start`, `pnpm telemetry:stop`, `pnpm telemetry:status`, and `pnpm telemetry:logs` manage this service alone.
-
-Set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` in `.env`, then run `pnpm dev`. Existing installations must run `pnpm db:migrate` for durable trace context. A blank endpoint disables exporters. Traces and logs export every second; metrics every five seconds. Search may lag ingestion, so use a known trace ID for immediate inspection.
+`pnpm telemetry:dashboard:stop` restores file-only collection and stops dashboards. Switching restarts the collector briefly, so some telemetry can be lost during the switch. Its configuration is reset to file-only on the next default local startup. Existing named dashboard volumes are retained.
 
 ## What is connected
 
@@ -31,22 +39,22 @@ Instrumentation does not add document bodies, prompts or credentials as attribut
 
 ## Live inspection by an agent
 
-The CLI uses Effect HTTP and Effect CLI, validates trace-ID arguments, and returns JSON. It only reads the local query APIs:
+The Effect CLI decodes retained local OTLP JSON and returns JSON without requiring a query backend:
 
 ```sh
 pnpm telemetry:traces
-pnpm telemetry:trace <trace-id>
+pnpm telemetry:trace <32-character-hex-trace-id>
 pnpm telemetry:events
-pnpm telemetry:traces --query '{ span.job.id != nil }'
-pnpm telemetry:traces --query '{ status = error }'
-pnpm telemetry:events --query '{service_name=~"imagine-reader.*"} |= "Job attempt failed"'
+pnpm telemetry:events --follow
 ```
 
-A specific book can be found in Tempo with `{ span.book.id = "BOOK_ID" }`. Logs carry trace/span IDs, so an error log leads back to the complete call tree. In Grafana, open Explore and select Tempo, Loki or Prometheus. No special debugging route, account credential or code change is needed for an agent to inspect the local stack.
+Trace inspection includes span and parent IDs, resource context, attributes, events and status. The list shows the latest twenty trace IDs. Events follow polls every second, retaining a bounded snapshot to avoid repeating records already printed. TraceQL and LogQL remain available through the optional dashboard, not through the file inspection commands.
+
+An agent can run these commands without an API debug endpoint or user credentials. Traces may be incomplete while operations are running or once earlier spans have rotated out. Log batches include trace/span IDs to connect failures to a call tree.
 
 ## Deployed hosts
 
-Use an OTLP HTTP collector reachable by both web and worker. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to its base URL; the exporters append `/v1/traces`, `/v1/logs`, and `/v1/metrics`. Use `OTEL_SERVICE_NAME=imagine-reader-web` and `imagine-reader-worker` to distinguish hosts while retaining trace continuity. A trusted collector can handle vendor authentication and routing. Keep the local Grafana package separate from deployed API processes.
+Use an OTLP HTTP collector reachable by both web and worker. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to its base URL; the exporters append `/v1/traces`, `/v1/logs`, and `/v1/metrics`. Use `OTEL_SERVICE_NAME=imagine-reader-web` and `imagine-reader-worker` to distinguish hosts while retaining trace continuity. A trusted collector can handle vendor authentication and routing. The future deployment can route to a managed telemetry provider through its supported protocol and authentication. AWS provisioning is not part of the local infrastructure package yet.
 
 ## Verification
 
@@ -54,7 +62,7 @@ Use an OTLP HTTP collector reachable by both web and worker. Set `OTEL_EXPORTER_
 
 ```sh
 TEST_OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 pnpm test:integration
-pnpm telemetry:traces --query '{ resource.service.name = "imagine-reader-tests" }'
+pnpm telemetry:traces
 ```
 
 Integration tests use a live clock for actual IO and telemetry. Unit tests use Effect's test services and verify persisted worker trace propagation independently of a collector.
