@@ -1,11 +1,11 @@
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer, Ref } from "effect";
 import { InvalidInput } from "@imagine/contracts/errors";
 import type { Job } from "@imagine/contracts/models";
-import { ProviderError } from "../src/domain/errors";
-import { Pipeline } from "../src/data/pipeline";
+import { Effect, Layer, Ref } from "effect";
+import { BookPipeline } from "../src/data/book-pipeline";
 import { JobQueue } from "../src/data/ports";
 import { Worker } from "../src/data/worker";
+import { ProviderError, InvalidPlan } from "../src/domain/errors";
 
 const job: Job = {
   id: "job",
@@ -17,9 +17,11 @@ const job: Job = {
   token: "token",
   attempts: 1,
   traceContext: null,
+  feedback: null,
 };
 
 it.effect.each([
+  { error: new InvalidPlan({ message: "Invalid scene interval" }), retryable: true },
   { error: new InvalidInput({ message: "Invalid document" }), retryable: false },
   {
     error: new ProviderError({ message: "Rate limited", retryable: true, cause: 429 }),
@@ -46,7 +48,10 @@ it.effect.each([
       }),
     );
 
-    const pipeline = Layer.succeed(Pipeline, Pipeline.of({ run: () => Effect.fail(error) }));
+    const pipeline = Layer.succeed(
+      BookPipeline,
+      BookPipeline.of({ run: () => Effect.fail(error) }),
+    );
 
     yield* Effect.gen(function* () {
       const worker = yield* Worker;
@@ -82,8 +87,8 @@ it.effect("continues the persisted trace in a separate worker invocation", () =>
     );
 
     const pipeline = Layer.succeed(
-      Pipeline,
-      Pipeline.of({
+      BookPipeline,
+      BookPipeline.of({
         run: () =>
           Effect.currentSpan.pipe(
             Effect.flatMap((span) => Ref.set(seen, span.traceId)),

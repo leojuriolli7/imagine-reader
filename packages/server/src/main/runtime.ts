@@ -1,10 +1,15 @@
+import { ObjectPublication } from "../data/object-publication";
 import { NodeServices } from "@effect/platform-node";
 import { Api } from "@imagine/contracts";
 import { Effect, FileSystem, Layer, ManagedRuntime } from "effect";
 import { HttpIncomingMessage, HttpRouter, HttpServer } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { Library, MAX_PDF_BYTES } from "../data/library";
-import { Pipeline } from "../data/pipeline";
+import { BookPipeline } from "../data/book-pipeline";
+import { ExtractBook } from "../data/steps/extract-book";
+import { EstablishArtDirection } from "../data/steps/establish-art-direction";
+import { PlanReadingWindow } from "../data/steps/plan-reading-window";
+import { RenderIllustration } from "../data/steps/render-illustration";
 import { ReaderSettings } from "../data/ports";
 import { Worker } from "../data/worker";
 import { AiLive } from "../infrastructure/ai/provider";
@@ -28,15 +33,30 @@ const ReaderSettingsLive = Layer.effect(
     mode: config.mode,
     plannerModel: config.plannerModel,
     imageModel: config.imageModel,
-    style:
-      "Literary watercolor illustration, muted natural colors, consistent character appearance, no text or lettering.",
   })),
 );
 
 const UseCasesLive = Layer.mergeAll(
   Library.layer,
-  Worker.layer.pipe(Layer.provide(Pipeline.layer)),
-).pipe(Layer.provideMerge(InfrastructureLive), Layer.provide(ReaderSettingsLive));
+  Worker.layer.pipe(
+    Layer.provide(
+      BookPipeline.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            ExtractBook.layer,
+            EstablishArtDirection.layer,
+            PlanReadingWindow.layer,
+            RenderIllustration.layer,
+          ),
+        ),
+      ),
+    ),
+  ),
+).pipe(
+  Layer.provide(ObjectPublication.layer),
+  Layer.provideMerge(InfrastructureLive),
+  Layer.provide(ReaderSettingsLive),
+);
 
 export const AppLive = UseCasesLive.pipe(
   Layer.provideMerge(ObservabilityLive),
@@ -44,7 +64,7 @@ export const AppLive = UseCasesLive.pipe(
   Layer.provide(NodeServices.layer),
 );
 
-export const HttpLive = HttpApiBuilder.layer(Api, { openapiPath: "/api/openapi.json" }).pipe(
+const HttpLive = HttpApiBuilder.layer(Api, { openapiPath: "/api/openapi.json" }).pipe(
   Layer.provide(BooksHandlers),
   Layer.provide(AuthorizationLive),
   Layer.provideMerge(AppLive),

@@ -12,8 +12,23 @@ export const AuthLive = Layer.effect(
     const config = yield* AppConfig;
 
     const pool = yield* Effect.acquireRelease(
-      Effect.sync(() => new Pool({ connectionString: config.database.url, max: 5 })),
-      (pool) => Effect.promise(() => pool.end()),
+      Effect.sync(
+        () =>
+          new Pool({
+            connectionString: config.database.url,
+            max: 5,
+            connectionTimeoutMillis: 5000,
+            statement_timeout: 15000,
+            lock_timeout: 5000,
+            query_timeout: 20000,
+          }),
+      ),
+      (pool) =>
+        Effect.promise(() => pool.end()).pipe(
+          Effect.interruptible,
+          Effect.timeoutOption("5 seconds"),
+          Effect.asVoid,
+        ),
     );
 
     const mail = yield* Effect.acquireRelease(

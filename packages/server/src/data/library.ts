@@ -1,13 +1,13 @@
-import { randomUUID } from "node:crypto";
+import { ObjectPublication } from "./object-publication";
 import { InvalidInput, NotFound } from "@imagine/contracts/errors";
 import type { Book, PipelineConfig } from "@imagine/contracts/models";
-import { Context, DateTime, Effect, Layer } from "effect";
-import { planJob, renderJobs } from "../domain/scheduling";
+import { Context, Crypto, DateTime, Effect, Layer } from "effect";
+import { BookWorkflow } from "../domain/book-workflow";
 import { BlobStorage, BookRepository, JobQueue, ReaderSettings } from "./ports";
 
 export const MAX_PDF_BYTES = 25 * 1024 * 1024;
 
-export const newBook = (
+const newBook = (
   id: string,
   ownerId: string,
   title: string,
@@ -26,13 +26,21 @@ export const newBook = (
   currentPage: 1,
   targetThrough: 50,
   plannedThrough: 0,
-  passages: [],
-  checkpoint: { summary: "", facts: [], activeIllustrationId: null },
+  pages: [],
+  artDirection: null,
+  characters: [],
+  summary: "",
+  activeIllustrationId: null,
+  spans: [],
   batches: [],
   illustrations: [],
 });
 
 const library = Effect.gen(function* () {
+  const publication = yield* ObjectPublication;
+
+  const crypto = yield* Crypto.Crypto;
+
   const books = yield* BookRepository;
 
   const storage = yield* BlobStorage;
@@ -62,27 +70,19 @@ const library = Effect.gen(function* () {
 
     const now = yield* DateTime.now;
 
-    const book = newBook(randomUUID(), owner, title, config, DateTime.formatIso(now));
+    const book = newBook(
+      yield* crypto.randomUUIDv4.pipe(Effect.orDie),
+      owner,
+      title,
+      config,
+      DateTime.formatIso(now),
+    );
 
-    // Prevent interruption between storing the object and committing or compensating its record.
-    yield* Effect.uninterruptible(
-      Effect.gen(function* () {
-        yield* storage.put(book.storageKey, bytes, "application/pdf");
-
-        yield* books
-          .create(book, [
-            { key: `extract:${book.id}`, bookId: book.id, kind: "extract", ref: "", priority: 0 },
-          ])
-          .pipe(
-            Effect.onError(() =>
-              storage
-                .remove(book.storageKey)
-                .pipe(
-                  Effect.catch((cause) => Effect.logError("Upload compensation failed", cause)),
-                ),
-            ),
-          );
-      }),
+    yield* publication.publish(
+      { key: book.storageKey, bytes, mediaType: "application/pdf" },
+      books.create(book, [
+        { key: `extract:${book.id}`, bookId: book.id, kind: "extract", ref: "", priority: 0 },
+      ]),
     );
 
     return book;
@@ -109,7 +109,7 @@ const library = Effect.gen(function* () {
           targetThrough: book.pageCount > 0 ? Math.min(book.pageCount, target) : target,
         };
 
-        return { book: updated, jobs: [...planJob(updated), ...renderJobs(updated)] };
+        return { book: updated, jobs: BookWorkflow.next(updated) };
       }),
     );
   });

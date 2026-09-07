@@ -10,11 +10,11 @@
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.112",
     "@imagine/server": "workspace:*",
-    "effect": "4.0.0-rc.112"
+    "effect": "4.0.0-rc.112",
+    "tsx": "latest"
   },
   "devDependencies": {
     "@types/node": "^22",
-    "tsx": "latest",
     "typescript": "^5.9.3"
   }
 }

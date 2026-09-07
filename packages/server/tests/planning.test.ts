@@ -1,125 +1,228 @@
-import { assert, describe, it } from "@effect/vitest";
+import { assert, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
-import { Plan, type BatchInput } from "@imagine/contracts/models";
-import { prepareBatch, validatePlan, illustrationAt } from "../src/domain/planning";
-import { demoPlan } from "../src/infrastructure/ai/demo";
+import { ReadingPlan } from "@imagine/contracts/planning";
+import { CharacterMemory } from "../src/domain/character-memory";
+import { PlanningWindow } from "../src/domain/planning-window";
+import { BookWorkflow } from "../src/domain/book-workflow";
+import { planningBook, readingPlan } from "./planning-fixture";
 
-const input: BatchInput = {
-  start: 9,
-  end: 17,
-  passages: [
-    { id: "p9", page: 9, text: "A quiet room, with a large window opening onto a garden." },
-  ],
-  checkpoint: {
-    summary: "",
-    facts: [{ description: "Blue coat", knownAfterPage: 1, sourcePassageIds: ["p1", "p2"] }],
-    activeIllustrationId: null,
-  },
-  existingIllustrations: [],
-  style: "watercolor",
-};
+it.effect("compiles page-based proposals into IDs, empty intervals and fixed visual prompts", () =>
+  Effect.gen(function* () {
+    const window = yield* PlanningWindow.open(planningBook(), null);
+    const proposal = yield* Schema.decodeUnknownEffect(ReadingPlan)(readingPlan());
+    const result = yield* window.compile(proposal);
 
-const emptyPlan = (): Plan => ({
-  illustrations: [],
-  spans: [{ start: 9, end: 17, illustrationId: null }],
-  checkpoint: input.checkpoint,
-});
+    assert.deepStrictEqual(result.spans, [
+      { start: 1, end: 2, illustrationId: null },
+      { start: 2, end: 9, illustrationId: "book:1:0" },
+    ]);
+    assert.include(result.illustrations[0]?.prompt ?? "", "Ink engraving");
+    assert.include(result.illustrations[0]?.prompt ?? "", "Blue coat");
+    assert.strictEqual(result.characters.length, 1);
+  }),
+);
 
-describe("planning rules", () => {
-  it.effect("carries established facts by value through schema decoding", () =>
+it.effect(
+  "keeps later appearance changes out of earlier scenes and resolves established aliases",
+  () =>
     Effect.gen(function* () {
-      const plan = yield* Schema.decodeUnknownEffect(Plan)(emptyPlan());
+      const window = yield* PlanningWindow.open(planningBook(), null);
+      const proposal = readingPlan();
+      const first = proposal.characterUpdates[0];
 
-      assert.deepStrictEqual(yield* validatePlan(plan, input), plan);
+      assert.isDefined(first);
+      if (!first) return;
 
-      const fact = plan.checkpoint.facts[0];
-
-      assert.isDefined(fact);
-
-      if (!fact) return;
-
-      yield* validatePlan(
-        {
-          ...plan,
-          checkpoint: {
-            ...plan.checkpoint,
-            facts: [{ ...fact, sourcePassageIds: [...fact.sourcePassageIds].reverse() }],
+      const result = yield* window.compile({
+        ...proposal,
+        characterUpdates: [
+          first,
+          {
+            ...first,
+            name: "Edmond",
+            aliases: ["Dantès"],
+            clothing: "Red coat",
+            knownAfterPage: 5,
           },
+        ],
+      });
+      const memory = new CharacterMemory(result.characters);
+
+      assert.include(result.illustrations[0]?.prompt ?? "", "Blue coat");
+      assert.notInclude(result.illustrations[0]?.prompt ?? "", "Red coat");
+      assert.strictEqual(memory.at(2)[0]?.clothing, "Blue coat");
+      assert.strictEqual(memory.at(6)[0]?.clothing, "Red coat");
+      assert.strictEqual(new Set(result.characters.map((value) => value.characterId)).size, 1);
+    }),
+);
+
+it.effect("reuses stored characters in later windows without requiring copied facts", () =>
+  Effect.gen(function* () {
+    const book = planningBook();
+    const first = yield* (yield* PlanningWindow.open(book, null)).compile(readingPlan());
+    const next = yield* PlanningWindow.open({ ...book, ...first, plannedThrough: 8 }, null);
+    const result = yield* next.compile({
+      scenes: [
+        {
+          prompt: "Edmond crosses a courtyard",
+          characters: ["Edmond"],
+          sourcePages: [9],
+          untilPage: 17,
         },
-        input,
-      );
-    }),
+      ],
+      characterUpdates: [],
+      summary: "He crosses a courtyard.",
+      carryUntilPage: null,
+    });
+
+    assert.include(result.illustrations[0]?.prompt ?? "", "Blue coat");
+    assert.strictEqual(result.characters.length, 1);
+  }),
+);
+
+it.effect.each([
+  { sourcePages: [10], untilPage: 9, characters: [] },
+  { sourcePages: [1], untilPage: 2, characters: [] },
+  { sourcePages: [1], untilPage: 9, characters: ["Unknown person"] },
+])("rejects invalid scene decisions %#", (scene) =>
+  Effect.gen(function* () {
+    const window = yield* PlanningWindow.open(planningBook(), null);
+    const error = yield* window
+      .compile({ ...readingPlan(), scenes: [{ ...scene, prompt: "A scene" }] })
+      .pipe(Effect.flip);
+
+    assert.strictEqual(error._tag, "InvalidPlan");
+  }),
+);
+
+it.effect("carries a boundary scene without showing it before its sources", () =>
+  Effect.gen(function* () {
+    const book = planningBook();
+    const window = yield* PlanningWindow.open(book, null);
+    const result = yield* window.compile({
+      ...readingPlan(),
+      scenes: [{ prompt: "A quiet room", characters: [], sourcePages: [8], untilPage: 10 }],
+    });
+
+    assert.deepStrictEqual(result.spans, [{ start: 1, end: 9, illustrationId: null }]);
+
+    const next = yield* PlanningWindow.open({ ...book, ...result, plannedThrough: 8 }, null);
+    const carried = yield* next.compile({
+      scenes: [],
+      characterUpdates: [],
+      carryUntilPage: 12,
+      summary: "The room remains quiet.",
+    });
+
+    assert.deepStrictEqual(carried.spans, [
+      { start: 9, end: 12, illustrationId: "book:1:0" },
+      { start: 12, end: 17, illustrationId: null },
+    ]);
+  }),
+);
+
+it.effect("bounds input without truncating pages and forwards retry feedback", () =>
+  Effect.gen(function* () {
+    const book = planningBook();
+    const window = yield* PlanningWindow.open(book, "Fix the scene end page.");
+    const dense = yield* PlanningWindow.open(
+      { ...book, pages: book.pages.map((page) => ({ ...page, text: "x".repeat(12000) })) },
+      null,
+    );
+
+    assert.strictEqual(window.input.end, 9);
+    assert.strictEqual(window.input.feedback, "Fix the scene end page.");
+    assert.strictEqual(dense.input.end, 3);
+    assert.strictEqual(dense.input.pages[0]?.text.length, 12000);
+  }),
+);
+
+it.effect("rejects future appearances, overlapping scenes and reveals beyond the book", () =>
+  Effect.gen(function* () {
+    const proposal = readingPlan();
+    const window = yield* PlanningWindow.open(planningBook(), null);
+
+    const future = yield* window
+      .compile({
+        ...proposal,
+        characterUpdates: proposal.characterUpdates.map((character) => ({
+          ...character,
+          knownAfterPage: 5,
+        })),
+      })
+      .pipe(Effect.flip);
+
+    assert.strictEqual(future._tag, "InvalidPlan");
+
+    const overlap = yield* window
+      .compile({
+        ...proposal,
+        scenes: [
+          ...proposal.scenes,
+          { prompt: "Another view", sourcePages: [3], untilPage: 9, characters: [] },
+        ],
+      })
+      .pipe(Effect.flip);
+
+    assert.include(overlap.message, "preceding scene ends");
+
+    const boundaryOverlap = yield* window
+      .compile({
+        ...proposal,
+        scenes: [
+          { prompt: "A final moment", sourcePages: [8], untilPage: 10, characters: [] },
+          { prompt: "The same moment", sourcePages: [8], untilPage: 10, characters: [] },
+        ],
+      })
+      .pipe(Effect.flip);
+
+    assert.include(boundaryOverlap.message, "preceding scene ends");
+
+    const finalWindow = yield* PlanningWindow.open(
+      { ...planningBook(), pageCount: 8, targetThrough: 8 },
+      null,
+    );
+    const beyond = yield* finalWindow
+      .compile({
+        ...proposal,
+        scenes: [{ prompt: "Too late", sourcePages: [8], untilPage: 10, characters: [] }],
+      })
+      .pipe(Effect.flip);
+
+    assert.include(beyond.message, "final book page");
+  }),
+);
+
+it.effect("rejects aliases that would merge different established people", () =>
+  Effect.gen(function* () {
+    const first = readingPlan().characterUpdates[0];
+
+    assert.isDefined(first);
+    if (!first) return;
+
+    const memory = yield* new CharacterMemory([]).append(
+      [first, { ...first, name: "Fernand", aliases: [] }],
+      "book",
+    );
+    const error = yield* memory
+      .append([{ ...first, aliases: ["Edmond", "Fernand"], knownAfterPage: 2 }], "book")
+      .pipe(Effect.flip);
+
+    assert.strictEqual(error._tag, "InvalidPlan");
+    assert.strictEqual(memory.at(2).length, 2);
+  }),
+);
+
+it("schedules art direction before planning and enables nearby rendering independently", () => {
+  const book = planningBook();
+
+  assert.deepStrictEqual(
+    BookWorkflow.next({ ...book, artDirection: null }).map((job) => job.kind),
+    ["art-direction"],
   );
-
-  it.effect("rejects facts whose contents change without new evidence", () =>
-    Effect.gen(function* () {
-      const plan = emptyPlan();
-
-      const modified = {
-        ...plan,
-        checkpoint: {
-          ...plan.checkpoint,
-          facts: [{ description: "Red coat", knownAfterPage: 1, sourcePassageIds: ["p1"] }],
-        },
-      };
-
-      const error = yield* validatePlan(modified, input).pipe(Effect.flip);
-
-      assert.strictEqual(error._tag, "InvalidInput");
-    }),
+  assert.deepStrictEqual(
+    BookWorkflow.next(book).map((job) => job.kind),
+    ["plan"],
   );
-
-  it.effect("rejects sources not established before an illustration is shown", () =>
-    Effect.gen(function* () {
-      const plan = demoPlan(input);
-
-      const bad = {
-        ...plan,
-        illustrations: plan.illustrations.map((i) => ({ ...i, revealPage: 9 })),
-      };
-
-      assert.strictEqual((yield* validatePlan(bad, input).pipe(Effect.flip))._tag, "InvalidInput");
-    }),
-  );
-
-  it.effect("requires exact continuous coverage", () =>
-    Effect.gen(function* () {
-      const bad = { ...emptyPlan(), spans: [{ start: 10, end: 17, illustrationId: null }] };
-
-      assert.strictEqual((yield* validatePlan(bad, input).pipe(Effect.flip))._tag, "InvalidInput");
-    }),
-  );
-
-  it.effect("bounds each batch without truncating source text", () =>
-    Effect.gen(function* () {
-      const passages = Array.from({ length: 50 }, (_, index) => ({
-        id: `p${index + 1}`,
-        page: index + 1,
-        text: "book text",
-      }));
-
-      const batch = yield* prepareBatch(
-        passages,
-        1,
-        50,
-        { summary: "", facts: [], activeIllustrationId: null },
-        [],
-        "s",
-      );
-
-      assert.strictEqual(batch.end, 9);
-
-      assert.strictEqual(batch.passages.length, 8);
-
-      const dense = passages.map((p) => ({ ...p, text: "x".repeat(12000) }));
-
-      assert.strictEqual((yield* prepareBatch(dense, 1, 50, input.checkpoint, [], "s")).end, 3);
-    }),
-  );
-
-  it("uses half-open image intervals", () => {
-    assert.strictEqual(illustrationAt([{ start: 2, end: 4, illustrationId: "i" }], 4), null);
-
-    assert.strictEqual(illustrationAt([{ start: 2, end: 4, illustrationId: "i" }], 2), "i");
-  });
+  assert.deepStrictEqual(BookWorkflow.next({ ...book, status: "extracting" }), []);
 });

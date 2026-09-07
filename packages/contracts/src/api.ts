@@ -7,15 +7,15 @@ import {
   HttpApiSchema,
 } from "effect/unstable/httpapi";
 import { Conflict, InvalidInput, NotFound, Unauthorized, Unavailable } from "./errors";
+import { ArtDirection, BookPage, CharacterAppearance, Page } from "./planning";
 import {
   BookView,
   Id,
   Identity,
   JobStatus,
-  Page,
-  Passage,
   PipelineConfig,
   SavedBatch,
+  WorkflowStage,
 } from "./models";
 
 export class CurrentReader extends Context.Service<CurrentReader, Identity>()(
@@ -33,14 +33,18 @@ const binary = Schema.Uint8Array.pipe(
 
 const errors = [InvalidInput, NotFound, Conflict, Unavailable];
 
-export const Inspector = Schema.Struct({
+const Inspector = Schema.Struct({
   config: PipelineConfig,
   batches: Schema.Array(SavedBatch),
-  passages: Schema.Array(Passage),
+  pages: Schema.Array(BookPage),
+  artDirection: Schema.NullOr(ArtDirection),
+  characters: Schema.Array(CharacterAppearance),
+  summary: Schema.String,
   jobs: Schema.Array(JobStatus),
+  workflow: Schema.Array(WorkflowStage),
 });
 
-export class BooksApi extends HttpApiGroup.make("books")
+class BooksApi extends HttpApiGroup.make("books")
   .add(
     HttpApiEndpoint.get("list", "/api/books", { success: Schema.Array(BookView), error: errors }),
     HttpApiEndpoint.post("upload", "/api/books", {

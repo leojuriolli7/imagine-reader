@@ -1,14 +1,14 @@
 # Testing
 
-Use `pnpm check` for lint, formatting, TypeScript and unit tests. Use `pnpm test:integration` with local services running to validate persistence and external adapters. `pnpm build` checks the Next.js production build.
+Use `pnpm check` for dead code, lint, formatting, TypeScript and unit tests. Use `pnpm test:integration` with local services running to validate persistence and external adapters. `pnpm build` checks the Next.js production build.
 
 Tests express behavior of the current services:
 
-- Planning: source grounding, immutable checkpoint facts, half-open spans and bounded batches.
+- Planning: page references, dated character appearances, alias identity, immutable render prompts, half-open spans and bounded windows.
 - Configuration: validated inputs, conditional credentials and literal boolean handling.
 - PDF: real text extraction and typed rejection of unreadable documents.
 - Worker: permanent versus transient failures and queue acknowledgement decisions and persisted trace propagation.
-- Integration: upload-to-image processing, authorization, transactional rollback, stale claims, S3 bytes and real auth sessions.
+- Integration: extraction → art direction → planning → image processing, authorization, transactional rollback, stale claims, S3 bytes and real auth sessions.
 - HTTP: generated endpoint parsing, session middleware, origin checks and upload-to-image transport.
 - Frontend: image eligibility and page navigation bounds.
 

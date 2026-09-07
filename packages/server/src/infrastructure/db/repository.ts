@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
 import { PgClient } from "@effect/sql-pg";
 import { Conflict, NotFound } from "@imagine/contracts/errors";
 import { Book, Job, type JobSpec, JobStatus } from "@imagine/contracts/models";
-import { Effect, Layer, Schema } from "effect";
+import { Crypto, Effect, Layer, Schema } from "effect";
+import { SqlError } from "effect/unstable/sql";
 import { BookRepository, JobQueue } from "../../data/ports";
 import { DatabaseError } from "../../domain/errors";
+import { databaseFailure } from "./failure";
 
 const StateRow = Schema.Struct({ state: Book });
 
@@ -14,13 +15,11 @@ const decodeJobs = Schema.decodeUnknownEffect(Schema.Array(Job));
 
 const decodeStatus = Schema.decodeUnknownEffect(Schema.Array(JobStatus));
 
-const databaseFailure = (operation: string) => (cause: unknown) =>
-  new DatabaseError({ operation, cause });
-
 export const RepositoryLive = Layer.effect(
   BookRepository,
   Effect.gen(function* () {
     const sql = yield* PgClient.PgClient;
+    const crypto = yield* Crypto.Crypto;
 
     const enqueue = Effect.fn("Outbox.enqueue")(function* (specs: readonly JobSpec[]) {
       const trace = yield* Effect.currentSpan.pipe(
@@ -30,8 +29,10 @@ export const RepositoryLive = Layer.effect(
 
       yield* Effect.forEach(
         specs,
-        (spec) =>
-          sql`INSERT INTO jobs (id, key, book_id, kind, ref, priority, trace_context) VALUES (${randomUUID()}, ${spec.key}, ${spec.bookId}, ${spec.kind}, ${spec.ref}, ${spec.priority}, ${trace ? sql.json(trace) : null}) ON CONFLICT (key) DO NOTHING`,
+        Effect.fn(function* (spec) {
+          const id = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+          return yield* sql`INSERT INTO jobs (id, key, book_id, kind, ref, priority, trace_context) VALUES (${id}, ${spec.key}, ${spec.bookId}, ${spec.kind}, ${spec.ref}, ${spec.priority}, ${trace ? sql.json(trace) : null}) ON CONFLICT (key) DO NOTHING`;
+        }),
       );
     });
 
@@ -45,7 +46,19 @@ export const RepositoryLive = Layer.effect(
               yield* enqueue(jobs);
             }),
           )
-          .pipe(Effect.mapError(databaseFailure("create"))),
+          .pipe(
+            Effect.mapError(databaseFailure("create")),
+            Effect.catchDefect((cause) =>
+              SqlError.isSqlError(cause)
+                ? Effect.fail(
+                    new DatabaseError({
+                      ...databaseFailure("commit")(cause),
+                      outcomeUnknown: true,
+                    }),
+                  )
+                : Effect.die(cause),
+            ),
+          ),
       ),
       get: Effect.fn("Books.get")(function* (id) {
         const rows = yield* sql`SELECT state FROM books WHERE id = ${id}`.pipe(
@@ -92,10 +105,21 @@ export const RepositoryLive = Layer.effect(
             }),
           )
           .pipe(
-            Effect.catchTags({
-              SqlError: (cause) => Effect.fail(databaseFailure("change")(cause)),
-              SchemaError: (cause) => Effect.fail(databaseFailure("decode book")(cause)),
-            }),
+            Effect.catchDefect((cause) =>
+              SqlError.isSqlError(cause)
+                ? Effect.fail(
+                    new DatabaseError({
+                      ...databaseFailure("transaction")(cause),
+                      outcomeUnknown: true,
+                    }),
+                  )
+                : Effect.die(cause),
+            ),
+            Effect.mapError((cause) =>
+              cause._tag === "SqlError" || cause._tag === "SchemaError"
+                ? databaseFailure("change")(cause)
+                : cause,
+            ),
           ),
       ),
     });
@@ -107,6 +131,7 @@ export const QueueLive = Layer.effect(
   JobQueue,
   Effect.gen(function* () {
     const sql = yield* PgClient.PgClient;
+    const crypto = yield* Crypto.Crypto;
 
     return JobQueue.of({
       claim: Effect.fn("Jobs.claim")((kinds) =>
@@ -116,14 +141,26 @@ export const QueueLive = Layer.effect(
               yield* sql`UPDATE jobs SET status = 'failed', error = 'Worker stopped during its final attempt.' WHERE status = 'running' AND lease_until <= clock_timestamp() AND attempts >= 3`;
 
               const rows =
-                yield* sql`WITH candidate AS (SELECT id FROM jobs WHERE kind IN ${sql.in(kinds)} AND available_at <= clock_timestamp() AND (status = 'queued' OR (status = 'running' AND lease_until <= clock_timestamp())) ORDER BY priority, created_at LIMIT 1 FOR UPDATE SKIP LOCKED) UPDATE jobs SET status = 'running', attempts = attempts + 1, token = ${randomUUID()}, lease_until = clock_timestamp() + interval '5 minutes', error = NULL FROM candidate WHERE jobs.id = candidate.id RETURNING jobs.id, jobs.key, jobs.book_id AS "bookId", jobs.kind, jobs.ref, jobs.priority, jobs.token, jobs.attempts, jobs.trace_context AS "traceContext"`.pipe(
+                yield* sql`WITH candidate AS (SELECT id FROM jobs WHERE kind IN ${sql.in(kinds)} AND available_at <= clock_timestamp() AND (status = 'queued' OR (status = 'running' AND lease_until <= clock_timestamp())) ORDER BY priority, created_at LIMIT 1 FOR UPDATE SKIP LOCKED) UPDATE jobs SET status = 'running', attempts = attempts + 1, token = ${yield* crypto.randomUUIDv4.pipe(Effect.orDie)}, lease_until = clock_timestamp() + interval '5 minutes', error = NULL FROM candidate WHERE jobs.id = candidate.id RETURNING jobs.id, jobs.key, jobs.book_id AS "bookId", jobs.kind, jobs.ref, jobs.priority, jobs.token, jobs.attempts, jobs.trace_context AS "traceContext", jobs.feedback`.pipe(
                   Effect.flatMap(decodeJobs),
                 );
 
               return rows[0] ?? null;
             }),
           )
-          .pipe(Effect.mapError(databaseFailure("claim"))),
+          .pipe(
+            Effect.mapError(databaseFailure("claim")),
+            Effect.catchDefect((cause) =>
+              SqlError.isSqlError(cause)
+                ? Effect.fail(
+                    new DatabaseError({
+                      ...databaseFailure("claim transaction")(cause),
+                      outcomeUnknown: true,
+                    }),
+                  )
+                : Effect.die(cause),
+            ),
+          ),
       ),
       complete: Effect.fn("Jobs.complete")((job) =>
         sql`UPDATE jobs SET status = 'done', lease_until = NULL WHERE id = ${job.id} AND token = ${job.token} AND status = 'running' AND lease_until > clock_timestamp()`.pipe(
@@ -132,7 +169,7 @@ export const QueueLive = Layer.effect(
         ),
       ),
       fail: Effect.fn("Jobs.fail")((job, message, retryable) =>
-        sql`UPDATE jobs SET status = ${retryable && job.attempts < 3 ? "queued" : "failed"}, error = ${message.slice(0, 500)}, lease_until = NULL, available_at = clock_timestamp() + ${2 ** job.attempts} * interval '1 second' WHERE id = ${job.id} AND token = ${job.token} AND status = 'running' AND lease_until > clock_timestamp()`.pipe(
+        sql`UPDATE jobs SET status = ${retryable && job.attempts < 3 ? "queued" : "failed"}, error = ${message.slice(0, 500)}, feedback = ${message.slice(0, 2000)}, lease_until = NULL, available_at = clock_timestamp() + ${2 ** job.attempts} * interval '1 second' WHERE id = ${job.id} AND token = ${job.token} AND status = 'running' AND lease_until > clock_timestamp()`.pipe(
           Effect.asVoid,
           Effect.mapError(databaseFailure("fail")),
         ),
@@ -144,7 +181,7 @@ export const QueueLive = Layer.effect(
         ),
       ),
       status: Effect.fn("Jobs.status")((id) =>
-        sql`SELECT kind, status, attempts, error FROM jobs WHERE book_id = ${id} ORDER BY created_at`.pipe(
+        sql`SELECT kind, CASE WHEN status = 'queued' AND attempts > 0 THEN 'retrying' ELSE status END AS status, attempts, error FROM jobs WHERE book_id = ${id} ORDER BY created_at`.pipe(
           Effect.flatMap(decodeStatus),
           Effect.mapError(databaseFailure("status")),
         ),

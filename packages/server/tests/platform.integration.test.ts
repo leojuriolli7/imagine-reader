@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { assert, layer } from "@effect/vitest";
-import { Effect, FileSystem } from "effect";
 import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
+import { PgClient } from "@effect/sql-pg";
+import { assert, layer } from "@effect/vitest";
 import { InvalidInput } from "@imagine/contracts/errors";
+import { Effect, FileSystem } from "effect";
 import { Library } from "../src/data/library";
-import { Worker } from "../src/data/worker";
 import { Authenticator, BlobStorage, BookRepository, JobQueue } from "../src/data/ports";
-import { TestApp, testOwner, testEmail } from "./support";
+import { Worker } from "../src/data/worker";
+import { BookWorkflow } from "../src/domain/book-workflow";
+import { TestApp, testEmail, testOwner } from "./support";
 
 layer(TestApp, { timeout: "30 seconds", excludeTestServices: true })("platform services", (it) => {
   it.effect("uploads, extracts, plans, renders and serves a book", () =>
@@ -30,7 +32,23 @@ layer(TestApp, { timeout: "30 seconds", excludeTestServices: true })("platform s
 
       assert.strictEqual((yield* library.owned(owner, book.id)).targetThrough, 50);
 
-      for (let i = 0; i < 12; i++) yield* worker.tick(["extract", "plan", "render"]);
+      yield* worker.tick(["extract"]);
+
+      const extracted = yield* library.owned(owner, book.id);
+
+      assert.isNull(extracted.artDirection);
+      assert.strictEqual(extracted.plannedThrough, 0);
+      assert.isAbove(extracted.pages.length, 0);
+
+      yield* worker.tick(["art-direction"]);
+
+      const directed = yield* library.owned(owner, book.id);
+
+      assert.isNotNull(directed.artDirection);
+      assert.strictEqual(directed.plannedThrough, 0);
+
+      for (let i = 0; i < 12; i++)
+        yield* worker.tick(["extract", "art-direction", "plan", "render"]);
 
       const ready = yield* library.owned(owner, book.id);
 
@@ -39,6 +57,14 @@ layer(TestApp, { timeout: "30 seconds", excludeTestServices: true })("platform s
       assert.strictEqual(ready.plannedThrough, ready.pageCount);
 
       assert.isTrue(ready.illustrations.some((i) => i.artifact !== null));
+
+      const queue = yield* JobQueue;
+
+      assert.isTrue(
+        BookWorkflow.describe(ready, yield* queue.status(book.id)).every(
+          (stage) => stage.status === "completed",
+        ),
+      );
 
       assert.deepStrictEqual(yield* library.file(owner, book.id), bytes);
 
@@ -105,6 +131,55 @@ layer(TestApp, { timeout: "30 seconds", excludeTestServices: true })("platform s
       assert.isTrue(
         (yield* queue.status(job.bookId)).some((j) => j.status === "queued" && j.attempts === 0),
       );
+    }),
+  );
+
+  it.effect("persists retry feedback, respects backoff and stops after three attempts", () =>
+    Effect.gen(function* () {
+      const library = yield* Library;
+      const books = yield* BookRepository;
+      const queue = yield* JobQueue;
+      const sql = yield* PgClient.PgClient;
+      const book = yield* library.upload(
+        testOwner,
+        "Retry policy",
+        new TextEncoder().encode("%PDF-test"),
+      );
+
+      yield* books.change(book.id, (current) =>
+        Effect.succeed({
+          book: current,
+          jobs: [
+            {
+              key: `art-direction:${book.id}`,
+              bookId: book.id,
+              kind: "art-direction",
+              ref: "",
+              priority: 0,
+            },
+          ],
+        }),
+      );
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const job = yield* queue.claim(["art-direction"]);
+
+        assert.isNotNull(job);
+        if (!job) return;
+
+        assert.strictEqual(job.bookId, book.id);
+        assert.strictEqual(job.attempts, attempt);
+        assert.strictEqual(job.feedback, attempt === 1 ? null : "Correct the page range.");
+
+        yield* queue.fail(job, "Correct the page range.", true);
+
+        const status = (yield* queue.status(book.id)).find((item) => item.kind === "art-direction");
+
+        assert.strictEqual(status?.status, attempt === 3 ? "failed" : "retrying");
+        assert.isNull(yield* queue.claim(["art-direction"]));
+
+        yield* sql`UPDATE jobs SET available_at = clock_timestamp() WHERE id = ${job.id}`;
+      }
     }),
   );
 

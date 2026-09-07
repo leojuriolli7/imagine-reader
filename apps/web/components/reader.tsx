@@ -73,6 +73,8 @@ export function Reader({ initial }: { initial: BookView }) {
 
   const failed = jobs.find((job) => job.status === "failed");
 
+  const retrying = jobs.some((job) => job.status === "retrying");
+
   return (
     <div className="min-h-screen bg-muted/30">
       <header className="flex flex-wrap items-center justify-between gap-4 border-b bg-background px-6 py-4">
@@ -175,8 +177,17 @@ export function Reader({ initial }: { initial: BookView }) {
             <p>
               {book.status === "extracting"
                 ? "Finding the words in your PDF…"
-                : `Planned through page ${book.plannedThrough} · reading ahead to ${book.targetThrough}`}
+                : !book.artDirection
+                  ? "Choosing an illustration style for this book…"
+                  : `Planned through page ${book.plannedThrough} · reading ahead to ${book.targetThrough}`}
             </p>
+            {retrying && <p>Processing hit a temporary problem. Retrying automatically…</p>}
+            {book.artDirection && (
+              <details>
+                <summary className="cursor-pointer">This book’s art direction</summary>
+                <p className="mt-2 leading-relaxed">{book.artDirection.style}</p>
+              </details>
+            )}
             {failed && (
               <div className="rounded-xl border bg-background p-4">
                 <p className="mb-3">

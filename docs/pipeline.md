@@ -1,39 +1,88 @@
-# Reading and illustration pipeline
+# Reading and illustration workflow
 
-## The automatic flow
+## Durable graph
 
-Upload → create book plus extraction job → immediately open PDF → extract mapped passages → plan pages 1–50 in small batches → render nearby illustrations → maintain coverage as page progress arrives.
+```mermaid
+flowchart LR
+  Upload --> ExtractBook
+  ExtractBook --> EstablishArtDirection
+  EstablishArtDirection --> PlanReadingWindow
+  PlanReadingWindow -->|next window| PlanReadingWindow
+  PlanReadingWindow -->|nearby scenes| RenderIllustration
+  Progress[Reader progress] -->|ensure coverage| PlanReadingWindow
+  Progress -->|nearby scenes| RenderIllustration
+```
 
-PDF display is independent of extraction. Extraction currently reads the whole PDF before the first planning call. Optimizing to incremental extraction is possible later. Planning starts with at most eight physical pages and 24,000 source characters; no source text is silently dropped to fit. A page too dense for the budget fails with a visible error. Text passages have stable IDs derived from physical page and 2,000-character chunk offset.
+`domain/book-workflow.ts` owns scheduling and stage status. `data/book-pipeline.ts` dispatches every job kind to a dedicated service in `data/steps/`. The dispatch table is exhaustive at compile time. Each step commits its result and follow-up jobs in one lease-guarded transaction. PostgreSQL persists the graph between worker runs; no in-memory conversation must survive a restart.
 
-The 50-page target is a scheduling horizon, not one expensive model call. Planning is sequential with a checkpoint so later batches inherit visual context. Each committed batch immediately schedules the next batch and relevant renders. Rendering runs on separate lanes, so a slow image cannot block planning.
+PDF display starts immediately. Extraction reads the PDF into numbered pages. Art direction then uses the title and up to twelve opening pages, limited to 24,000 characters, to identify the work when supported and choose its setting, medium, palette and composition. Unknown title/author remain null. The style describes the story's setting, which can differ from its publication period, and is saved once per book.
 
-## Contracts
+The initial planning target is fifty pages. Consecutive planning windows contain at most eight whole PDF pages and 24,000 text characters. A page too dense for that budget fails visibly; planning never silently truncates a page. One planning lane advances windows in order while two rendering lanes generate nearby images independently.
 
-`prepareBatch(passages, start, target, checkpoint, existingIllustrations, style)` returns a `BatchInput` with an exclusive `end`.
+## Model contracts
 
-`Planner.plan(input)` returns:
+The exact Effect schemas and input types live in `packages/contracts/src/planning.ts`.
 
-- new illustrations: local ID, reason, full prompt, source passage IDs, reveal page;
-- complete display spans, including explicit null images;
-- continuity checkpoint: summary, sourced facts, active illustration ID.
+Art direction returns:
 
-The AI adapter validates structure with Effect Schema. `validatePlan(plan, input)` validates semantics: sources exist, IDs are unique, spans cover exactly the batch without overlap, references resolve, and display starts do not precede source reveals. The application replaces local illustration IDs with stable IDs before committing.
+```ts
+{
+  title: string | null,
+  author: string | null,
+  setting: string,
+  style: string
+}
+```
 
-Zero new illustrations is a valid result. A previous image can span later batches when the planner keeps it. The final page's illustration can be deferred into the checkpoint. A future batch must explicitly assign it a valid display span.
+Planning receives `start`, exclusive `end`, total `pageCount`, numbered `pages`, saved `direction`, the character appearances known before this window, the preceding `summary`, an optional `activeScene`, and optional validation `feedback` from the previous attempt. Its output is:
 
-## Timing
+```ts
+{
+  scenes: [{
+    prompt: string,
+    sourcePages: number[],
+    untilPage: number,
+    characters: string[]
+  }],
+  carryUntilPage: number | null,
+  characterUpdates: [{
+    name: string,
+    aliases: string[],
+    appearance: string,
+    design: string,
+    clothing: string,
+    knownAfterPage: number
+  }],
+  summary: string
+}
+```
 
-Page numbers are physical PDF pages, one-based. Ranges are `[start, end)`. A picture supported by text on page 3 can appear on page 4 at the earliest. This is a conservative reading rule: a page viewport does not prove a sentence has been read. There is no eye tracking or sentence-level reveal.
+`sourcePages` references physical PDF page numbers supplied in this window. `untilPage` is exclusive. The application reveals a scene on `max(sourcePages) + 1`, assigns its persistent ID, inserts blank intervals, and freezes the full image prompt with art direction and the appropriate character snapshots. The model does not allocate IDs or construct an exhaustive timeline. Zero scenes and zero character updates are valid.
 
-The rendering horizon includes spans intersecting the current page through 12 pages ahead. Completed artifacts outside their display span remain hidden. Revisiting an earlier page can display its saved image. Page updates are debounced, and queued jobs are deduplicated by book/illustration or planning boundary.
+`PlanningWindow.open` owns the input budget. `PlanningWindow.compile` checks source membership, chronology, non-overlap and character availability, then constructs the saved plan. Effect Schema decodes the external response before these relational rules run. Structural validation cannot prove that prose contains no hallucinations or spoilers; review generated scenes against the book when assessing model quality.
 
-Jumping forward raises the horizon, but v1 continues planning sequentially from its checkpoint. It does **not** yet start a separate section-local planning branch at the jump destination. Reading remains available while planning catches up. Full-book and selected-chapter controls are also not exposed yet.
+## Character memory
 
-Already queued image jobs are allowed to finish when the reader leaves or jumps; only new scheduling is bounded. Blank space appears when an image is late or no image is warranted. A missing image never blocks a page turn.
+`CharacterMemory` owns identity matching and append-only appearance history. The model uses names and known aliases; the application assigns stable character IDs. Updates are complete snapshots of appearance, deliberate design choices for unspecified features, and temporary clothing, dated to the page establishing them. Existing snapshots need not be copied into every response.
 
-## What still needs real-book evaluation
+A later coat, injury, disguise or age does not replace earlier history. Each scene resolves characters at its latest source page and saves those snapshots inside its immutable render request. Subsequent planning and rendering cannot silently change an earlier prompt. Conflicting identities or references unavailable at that page fail with `InvalidPlan`; the next durable attempt receives feedback to correct the proposal.
 
-The deterministic demo proves delivery mechanics only. Real AI evaluation should score image usefulness, source faithfulness, spoiler leakage, continuity, and latency with descriptive, dialogue-heavy and action-heavy books. Provider output can contain invented details despite structurally valid source references. There is no separate semantic reviewer yet.
+Appearance consistency is driven by text prompts. It does not guarantee identical faces across independently generated images. Reference-image conditioning would be a separate rendering capability.
 
-The current source-character budget does not include accumulated checkpoint/illustration context. Very long illustrated books may need a bounded visual-reference index instead of sending all existing illustration metadata. Visual continuity is textual, not reference-image based.
+## Display timing
+
+Pages are one-based and intervals are `[start, end)`. Text on page 3 can support an image on page 4 at the earliest. A page viewport cannot establish which sentence has been read.
+
+A scene supported by the final page of a window may be saved for the next window. A scene cannot reveal beyond the final book page. The next plan explicitly carries it with `carryUntilPage`. Render jobs are created for spans intersecting the current page through twelve pages ahead. Saved artifacts remain hidden outside their spans; returning to earlier pages reuses them.
+
+Jumping ahead raises the target, and planning continues sequentially with saved memory. Already queued image jobs may finish after a jump. A missing image never blocks reading.
+
+## Failure and recovery
+
+The inspector exposes `extract`, `art-direction`, `plan` and `render` with waiting, queued, running, retrying, failed or completed status. The reader reports art-direction preparation, automatic retries and actionable failures.
+
+Invalid proposals, transient provider failures, database/storage errors and claim conflicts use the persistent retry policy: three total attempts with two- and four-second delays. Invalid documents and permanent provider failures stop immediately. The provider adds no nested retry loop. Retry feedback is persisted alongside the job. An owner can explicitly reset failed jobs after correcting the cause.
+
+Each attempt has a fencing token and five-minute lease. Successful steps can be replayed without regenerating committed results. Render uploads use bounded compensation after a confirmed failed commit. Cancellation during a commit or a lost commit response preserves the object and logs its key, because the database may already reference it. A crash after a paid provider response but before its result is saved can still incur another provider call.
+
+Every step, domain Effect operation and AI request is traced. Follow-up jobs retain the current trace context and retries restore it, connecting the HTTP request to later worker activity. See [observability](observability.md).

@@ -1,6 +1,7 @@
 import type { JobKind } from "@imagine/contracts/models";
-import { Context, Effect, Layer, Metric, Tracer } from "effect";
-import { Pipeline } from "./pipeline";
+import { Context, Effect, Layer, Match, Metric, Tracer } from "effect";
+import { BookPipeline } from "./book-pipeline";
+import { BookWorkflow } from "../domain/book-workflow";
 import { JobQueue } from "./ports";
 
 const completed = Metric.counter("imagine.jobs.completed", { incremental: true });
@@ -9,7 +10,7 @@ const failedAttempts = Metric.counter("imagine.jobs.failed_attempts", { incremen
 const worker = Effect.gen(function* () {
   const queue = yield* JobQueue;
 
-  const pipeline = yield* Pipeline;
+  const pipeline = yield* BookPipeline;
 
   const tick = Effect.fn("Worker.tick")(function* (kinds: readonly JobKind[]) {
     const job = yield* queue.claim(kinds);
@@ -37,12 +38,18 @@ const worker = Effect.gen(function* () {
             errorTag: error._tag,
           });
 
-          const retryable =
-            error._tag === "ProviderError"
-              ? error.retryable
-              : error._tag === "DatabaseError" ||
-                error._tag === "StorageError" ||
-                error._tag === "Conflict";
+          const retryable = Match.value(error).pipe(
+            Match.tags({
+              ProviderError: (failure) => failure.retryable,
+              DatabaseError: (failure) => failure.retryable,
+              StorageError: (failure) => failure.retryable,
+              InvalidPlan: () => true,
+              Conflict: () => true,
+              InvalidInput: () => false,
+              NotFound: () => false,
+            }),
+            Match.exhaustive,
+          );
 
           yield* queue.fail(
             job,
@@ -76,9 +83,16 @@ const worker = Effect.gen(function* () {
       ),
     );
 
-  const run = Effect.all([lane(["extract", "plan"]), lane(["render"]), lane(["render"])], {
-    concurrency: "unbounded",
-  });
+  const run = Effect.all(
+    [
+      lane(BookWorkflow.planningLane),
+      lane(BookWorkflow.renderingLane),
+      lane(BookWorkflow.renderingLane),
+    ],
+    {
+      concurrency: "unbounded",
+    },
+  );
 
   return { tick, run };
 });

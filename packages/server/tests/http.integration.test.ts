@@ -1,12 +1,12 @@
-import { assert, it } from "@effect/vitest";
 import { readFileSync } from "node:fs";
+import { assert, it } from "@effect/vitest";
+import { Api } from "@imagine/contracts";
+import { BookView } from "@imagine/contracts/models";
 import { Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { Api } from "@imagine/contracts";
-import { BookView } from "@imagine/contracts/models";
-import { Worker } from "../src/data/worker";
 import { Authenticator } from "../src/data/ports";
+import { Worker } from "../src/data/worker";
 import { AuthorizationLive, BooksHandlers } from "../src/presentation/http";
 import { TestApp, testOwner } from "./support";
 
@@ -123,7 +123,7 @@ it.live("runs an HTTP upload through the worker and serves its illustration", ()
           const worker = yield* Worker;
 
           for (let attempt = 0; attempt < 12; attempt++)
-            yield* worker.tick(["extract", "plan", "render"]);
+            yield* worker.tick(["extract", "art-direction", "plan", "render"]);
         }),
       ),
     );

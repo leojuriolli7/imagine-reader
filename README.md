@@ -1,6 +1,6 @@
 # ImagineReader
 
-A private PDF reader that plans illustrations ahead of your reading position. Open a book while the worker extracts its text, plans the next fifty pages, and generates nearby scenes.
+A private PDF reader that plans illustrations ahead of your reading position. Open a book while the worker extracts its text, establishes its art direction, plans the next fifty pages, and generates nearby scenes.
 
 Built with Next.js, shadcn, React Query, Effect 4, Effect SQL/PostgreSQL, Better Auth, and S3. Shared Effect Schema contracts generate the HTTP client and OpenAPI description.
 
@@ -47,7 +47,7 @@ PLANNER_MODEL=gpt-4.1-mini
 IMAGE_MODEL=gpt-image-2
 ```
 
-Restart the web and worker after changing configuration. A book captures its mode, models and style on upload; upload a new book to use different settings. OpenAI credentials need billing and access to the chosen models.
+Restart the web and worker after changing configuration. A book captures its mode and models on upload; its own art direction is established before planning; upload a new book to use different settings. OpenAI credentials need billing and access to the chosen models.
 
 ## Local S3
 
@@ -72,7 +72,7 @@ apps/web                 Next.js host, shadcn UI, React Query
 apps/worker              NodeRuntime background process
 packages/contracts       Effect schemas, tagged HTTP errors, HttpApi definition
 packages/server/src
-  domain                 Source validation and scheduling rules
+  domain                 PlanningWindow, CharacterMemory and BookWorkflow
   data                   Effect services, use cases and dependency contracts
   infrastructure         Effect SQL, AI, auth, S3, PDF and Config adapters
   presentation           HttpApi handlers and authentication middleware
@@ -86,13 +86,15 @@ Application services depend on `Context.Service` contracts. Layers supply implem
 
 ## Jobs and errors
 
-PostgreSQL persists jobs and commits follow-up jobs atomically with book state. Claims use row locks, unique job keys and five-minute leases with fencing tokens. Each worker has one extraction/planning lane and two rendering lanes.
+PostgreSQL persists jobs and commits follow-up jobs atomically with book state. Claims use row locks, unique job keys and five-minute leases with fencing tokens. Each worker has one extraction/art-direction/planning lane and two rendering lanes.
 
-Transient failures have three total attempts with two- and four-second retry delays. Invalid PDFs and permanent provider failures stop immediately. Owner-triggered retry resets failed jobs. Invalid provider plans may retry, while source and spoiler checks remain strict. Provider SDKs do not add another retry loop. A hard crash leaves a recoverable lease; a stale attempt cannot commit results. AI providers may charge twice if a process crashes after a successful external request and before saving its result.
+Transient failures have three total attempts with two- and four-second retry delays. Invalid PDFs and permanent provider failures stop immediately. Owner-triggered retry resets failed jobs. Invalid provider plans may retry, with validation feedback; page references, chronology and character availability are checked before commit. Provider SDKs do not add another retry loop. A hard crash leaves a recoverable lease; a stale attempt cannot commit results. AI providers may charge twice if a process crashes after a successful external request and before saving its result.
 
-NodeRuntime manages worker cancellation and scoped cleanup. Shutdown cancels in-flight interruptible work; short storage/commit compensation sections complete before resources close. Configure a process supervisor to restart unexpected worker exits. SQL remains the authority for durable recovery.
+NodeRuntime manages worker cancellation and scoped cleanup. Shutdown cancels in-flight interruptible work; compensation is bounded and response bodies are closed before resources release. Configure a process supervisor to restart unexpected worker exits. SQL remains the authority for durable recovery.
 
 ## Quality and observability
+
+`pnpm install` installs the tracked Git pre-push hook. Each push runs TypeScript checks, unit tests, then the Next.js production build, stopping at the first failure. The build verifies bundling and framework constraints beyond TypeScript. Run the same sequence with `pnpm prepush`, or restore hook configuration with `pnpm hooks:install`. Integration tests remain separate because they require PostgreSQL, S3 and SMTP; the hook does not start local services. As with any local Git hook, CI should enforce the same checks for shared branches.
 
 ```sh
 pnpm check
@@ -100,7 +102,7 @@ pnpm test:integration
 pnpm build
 ```
 
-Oxlint and vendored anti-slop rules check application code. Biome handles formatting. Vitest and `@effect/vitest` exercise domain behavior and real service boundaries. Effect versions and Oxlint/plugin versions are pinned together. Read `AGENTS.md` before changing Effect code.
+Knip checks unused files, exports and dependencies in both normal and production graphs, catching code referenced only by tests. Oxlint and vendored anti-slop rules check application code. Biome handles formatting. Vitest and `@effect/vitest` exercise domain behavior and real service boundaries. Effect versions and Oxlint/plugin versions are pinned together. Read `AGENTS.md` before changing Effect code.
 
 Effect exports traces, correlated logs and worker metrics to the local Grafana stack. Open http://localhost:53000 (admin / admin), then Explore → Tempo for traces or Loki for logs. Configuration:
 
@@ -109,7 +111,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 OTEL_SERVICE_NAME=imagine-reader
 ```
 
-Durable jobs retain their trace context: API upload → SQL/outbox → worker extraction → planning → rendering remain connected, including retries across process restarts. Effect AI records models, token usage and provider timing; image generation records its model and HTTP call. Named use cases, SQL, S3 and authentication operations appear as child spans.
+Durable jobs retain their trace context: API upload → SQL/outbox → worker extraction → art direction → planning → rendering remain connected, including retries across process restarts. Effect AI records models, token usage and provider timing; image generation records its model and HTTP call. Named use cases, SQL, S3 and authentication operations appear as child spans.
 
 ```sh
 pnpm telemetry:traces
@@ -140,7 +142,8 @@ See [observability](docs/observability.md) for queries and deployment, [environm
 | `pnpm lint` / `pnpm format` | Lint / format code |
 | `pnpm test` / `pnpm test:watch` / `pnpm test:coverage` | Unit tests |
 | `pnpm test:integration` | Real database, auth, HTTP and S3 tests |
-| `pnpm check` | Lint, formatting, TypeScript and unit tests |
+| `pnpm deadcode` | Check unused files, exports and dependencies, including test-only code |
+| `pnpm check` | Dead code, lint, formatting, TypeScript and unit tests |
 | `pnpm build` | Build the web app |
 | `pnpm deploy:prepare` | Validate settings/storage, check and build |
 | `pnpm start:web` / `pnpm start:worker` | Start deployed hosts |

@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { BookRepository, BlobStorage } from "../src/data/ports";
 import { NodeServices } from "@effect/platform-node";
 import { PgClient, PgMigrator } from "@effect/sql-pg";
 import { Config, ConfigProvider, Effect, Layer, Redacted, Schema } from "effect";
-import { AppLive } from "../src/main/runtime";
+import { BlobStorage, BookRepository } from "../src/data/ports";
 import { migrations } from "../src/infrastructure/db/migrations";
+import { AppLive } from "../src/main/runtime";
 
 export const testOwner = randomUUID();
 

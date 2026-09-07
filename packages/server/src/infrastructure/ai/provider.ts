@@ -1,5 +1,5 @@
 import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai";
-import { Plan } from "@imagine/contracts/models";
+import { ArtDirection, ReadingPlan } from "@imagine/contracts/planning";
 import { Effect, Layer, Redacted, Schema } from "effect";
 import { LanguageModel } from "effect/unstable/ai";
 import {
@@ -11,12 +11,12 @@ import {
 import { Illustrations } from "../../data/ports";
 import { ProviderError } from "../../domain/errors";
 import { AppConfig } from "../config";
-import { demoImage, demoPlan } from "./demo";
-import { PLANNER_INSTRUCTIONS } from "./instructions";
+import { demoImage, demoPlan, demoDirection } from "./demo";
+import { PLANNER_INSTRUCTIONS, ART_DIRECTION_INSTRUCTIONS } from "./instructions";
 
 const ImageResponse = Schema.Struct({
   data: Schema.Array(
-    Schema.Struct({ b64_json: Schema.String.check(Schema.isMinLength(1), Schema.isBase64()) }),
+    Schema.Struct({ b64_json: Schema.Uint8ArrayFromBase64.check(Schema.isMinLength(1)) }),
   ).check(Schema.isMinLength(1)),
 });
 
@@ -31,47 +31,62 @@ export const AiLive = Layer.effect(
       Layer.provide(FetchHttpClient.layer),
     );
 
+    const generate = Effect.fn("AI.generate")(function* <A, I extends Record<string, unknown>>(
+      schema: Schema.Codec<A, I>,
+      instructions: string,
+      input: string,
+      model: string,
+    ) {
+      if (!Redacted.value(config.openaiKey))
+        return yield* new ProviderError({
+          message: "OPENAI_API_KEY is required.",
+          retryable: false,
+          cause: "Missing key",
+        });
+
+      return yield* LanguageModel.generateObject({
+        schema,
+        prompt: [
+          { role: "system", content: instructions },
+          { role: "user", content: input },
+        ],
+      }).pipe(
+        Effect.provide(OpenAiLanguageModel.layer({ model }).pipe(Layer.provide(openai))),
+        Effect.map((result) => result.value),
+        Effect.mapError(
+          (cause) =>
+            new ProviderError({ message: cause.message, retryable: cause.isRetryable, cause }),
+        ),
+        Effect.timeout("180 seconds"),
+        Effect.catchTag("TimeoutError", (cause) =>
+          Effect.fail(
+            new ProviderError({ message: "AI planning timed out.", retryable: true, cause }),
+          ),
+        ),
+      );
+    });
+
     return Illustrations.of({
-      plan: Effect.fn("AI.plan")((input, settings) => {
-        if (settings.mode === "demo") return Effect.succeed(demoPlan(input));
-
-        if (!Redacted.value(config.openaiKey))
-          return Effect.fail(
-            new ProviderError({
-              message: "OPENAI_API_KEY is required.",
-              retryable: false,
-              cause: "Missing key",
-            }),
-          );
-
-        return LanguageModel.generateObject({
-          objectName: "illustration_plan",
-          schema: Plan,
-          prompt: [
-            { role: "system", content: PLANNER_INSTRUCTIONS },
-            { role: "user", content: JSON.stringify(input) },
-          ],
-        }).pipe(
-          Effect.provide(
-            OpenAiLanguageModel.layer({ model: settings.plannerModel }).pipe(Layer.provide(openai)),
-          ),
-          Effect.map((result) => result.value),
-          Effect.annotateSpans({
-            "ai.mode": settings.mode,
-            "gen_ai.request.model": settings.plannerModel,
-          }),
-          Effect.mapError(
-            (cause) =>
-              new ProviderError({ message: cause.message, retryable: cause.isRetryable, cause }),
-          ),
-          Effect.timeout("180 seconds"),
-          Effect.catchTag("TimeoutError", (cause) =>
-            Effect.fail(
-              new ProviderError({ message: "Planning timed out.", retryable: true, cause }),
+      direct: Effect.fn("AI.artDirection")((input, settings) =>
+        settings.mode === "demo"
+          ? Effect.succeed(demoDirection(input))
+          : generate(
+              ArtDirection,
+              ART_DIRECTION_INSTRUCTIONS,
+              JSON.stringify(input),
+              settings.plannerModel,
             ),
-          ),
-        );
-      }),
+      ),
+      plan: Effect.fn("AI.plan")((input, settings) =>
+        settings.mode === "demo"
+          ? Effect.succeed(demoPlan(input))
+          : generate(
+              ReadingPlan,
+              PLANNER_INSTRUCTIONS,
+              JSON.stringify(input),
+              settings.plannerModel,
+            ),
+      ),
       render: Effect.fn("AI.render")((prompt, settings) => {
         if (settings.mode === "demo") return demoImage;
 
@@ -124,7 +139,7 @@ export const AiLive = Layer.effect(
             });
 
           return {
-            bytes: new Uint8Array(Buffer.from(image.b64_json, "base64")),
+            bytes: image.b64_json,
             mediaType: "image/png",
             model: settings.imageModel,
           };

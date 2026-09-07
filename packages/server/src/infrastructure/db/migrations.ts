@@ -4,6 +4,14 @@ import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
 export const migrations = PgMigrator.fromRecord({
+  "003_reading_workflow": Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const source = yield* Effect.sync(() =>
+      readFileSync(new URL("./migrations/003-reading-workflow.sql", import.meta.url), "utf8"),
+    );
+
+    yield* sql.unsafe(source).withoutTransform;
+  }),
   "002_job_trace_context": Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 

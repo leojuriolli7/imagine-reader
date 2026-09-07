@@ -1,11 +1,11 @@
-import { assert, it } from "@effect/vitest";
-import { NodeServices } from "@effect/platform-node";
-import { Effect, FileSystem } from "effect";
 import { fileURLToPath } from "node:url";
+import { NodeServices } from "@effect/platform-node";
+import { assert, it } from "@effect/vitest";
+import { Effect, FileSystem } from "effect";
 import { Extractor } from "../src/data/ports";
 import { PdfLive } from "../src/infrastructure/pdf";
 
-it.effect("extracts page-indexed passages from a real PDF", () =>
+it.effect("extracts page-labelled text from a real PDF", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
 
@@ -19,9 +19,9 @@ it.effect("extracts page-indexed passages from a real PDF", () =>
 
     assert.isAbove(result.pageCount, 0);
 
-    assert.isAbove(result.passages.length, 0);
+    assert.isAbove(result.pages.length, 0);
 
-    assert.isTrue(result.passages.every((p) => p.page >= 1 && p.page <= result.pageCount));
+    assert.isTrue(result.pages.every((p) => p.page >= 1 && p.page <= result.pageCount));
   }).pipe(Effect.provide(PdfLive), Effect.provide(NodeServices.layer)),
 );
 

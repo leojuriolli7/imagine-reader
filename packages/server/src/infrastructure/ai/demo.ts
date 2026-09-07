@@ -1,35 +1,35 @@
-import type { BatchInput, Plan } from "@imagine/contracts/models";
+import type {
+  ArtDirectionInput,
+  ArtDirection,
+  PlanningInput,
+  ReadingPlan,
+} from "@imagine/contracts/planning";
 import { Effect } from "effect";
 
-export const demoPlan = (input: BatchInput): Plan => {
-  const source = input.passages.find((p) => p.text.length > 20 && p.page < input.end - 1);
+export const demoDirection = (input: ArtDirectionInput): ArtDirection => ({
+  title: input.title,
+  author: null,
+  setting: "Use the setting described in the supplied pages.",
+  style: "Illustrated paper collage, warm ochre and forest green, simple silhouettes.",
+});
 
-  if (!source)
-    return {
-      illustrations: [],
-      spans: [{ start: input.start, end: input.end, illustrationId: null }],
-      checkpoint: { ...input.checkpoint, activeIllustrationId: null },
-    };
-
-  const id = `scene-${input.start}`;
-
-  const revealPage = source.page + 1;
+export const demoPlan = (input: PlanningInput): ReadingPlan => {
+  const source = input.pages.find((page) => page.text.length > 20 && page.page < input.end - 1);
 
   return {
-    illustrations: [
-      {
-        id,
-        prompt: "A quiet room in watercolor.",
-        reason: "Demo illustration",
-        sourcePassageIds: [source.id],
-        revealPage,
-      },
-    ],
-    spans: [
-      { start: input.start, end: revealPage, illustrationId: null },
-      { start: revealPage, end: input.end, illustrationId: id },
-    ],
-    checkpoint: { summary: "Demo checkpoint", facts: [], activeIllustrationId: id },
+    scenes: source
+      ? [
+          {
+            prompt: "A quiet room with a large window overlooking a garden.",
+            sourcePages: [source.page],
+            untilPage: input.end,
+            characters: [],
+          },
+        ]
+      : [],
+    carryUntilPage: null,
+    characterUpdates: [],
+    summary: "Demo reading window.",
   };
 };
 

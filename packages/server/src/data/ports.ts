@@ -1,15 +1,19 @@
+import type {
+  ArtDirectionInput,
+  ArtDirection,
+  PlanningInput,
+  ReadingPlan,
+  BookPage,
+} from "@imagine/contracts/planning";
 import type { Conflict, InvalidInput, NotFound } from "@imagine/contracts/errors";
 import type {
-  BatchInput,
   Book,
   Identity,
   Job,
   JobKind,
   JobSpec,
   JobStatus,
-  Passage,
   PipelineConfig,
-  Plan,
 } from "@imagine/contracts/models";
 import { Context, Effect } from "effect";
 import type {
@@ -42,14 +46,18 @@ export class Extractor extends Context.Service<
   {
     extract(
       bytes: Uint8Array,
-    ): Effect.Effect<{ passages: readonly Passage[]; pageCount: number }, InvalidInput>;
+    ): Effect.Effect<{ pages: readonly BookPage[]; pageCount: number }, InvalidInput>;
   }
 >()("imagine/Extractor") {}
 
 export class Illustrations extends Context.Service<
   Illustrations,
   {
-    plan(input: BatchInput, config: PipelineConfig): Effect.Effect<Plan, ProviderError>;
+    direct(
+      input: ArtDirectionInput,
+      config: PipelineConfig,
+    ): Effect.Effect<ArtDirection, ProviderError>;
+    plan(input: PlanningInput, config: PipelineConfig): Effect.Effect<ReadingPlan, ProviderError>;
     render(
       prompt: string,
       config: PipelineConfig,
@@ -69,11 +77,11 @@ export class BookRepository extends Context.Service<
     create(book: Book, jobs: readonly JobSpec[]): Effect.Effect<void, DatabaseError>;
     get(id: string): Effect.Effect<Book | null, DatabaseError>;
     list(owner: string): Effect.Effect<readonly Book[], DatabaseError>;
-    change(
+    change<E extends InvalidInput | Conflict | NotFound>(
       id: string,
-      update: (book: Book) => Effect.Effect<Change, InvalidInput | Conflict | NotFound>,
+      update: (book: Book) => Effect.Effect<Change, E>,
       lease?: Job,
-    ): Effect.Effect<void, DatabaseError | InvalidInput | Conflict | NotFound>;
+    ): Effect.Effect<void, DatabaseError | Conflict | NotFound | E>;
   }
 >()("imagine/BookRepository") {}
 

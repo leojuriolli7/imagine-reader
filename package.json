@@ -16,8 +16,11 @@
     "db:migrate": "dotenv -e .env -- pnpm --filter @imagine/server db:migrate",
     "services:up": "docker compose up -d --wait && pnpm storage:start && pnpm telemetry:start",
     "services:down": "docker compose down && pnpm storage:stop && pnpm telemetry:stop",
-    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
+    "check": "pnpm deadcode && pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
     "postinstall": "node scripts/pdf-worker.mjs",
+    "prepare": "pnpm hooks:install",
+    "hooks:install": "node scripts/install-hooks.mjs",
+    "prepush": "pnpm typecheck && pnpm test && pnpm build",
     "test:coverage": "vitest run --coverage",
     "local:setup": "node scripts/setup.mjs",
     "local:up": "pnpm local:setup && pnpm services:up && pnpm db:migrate && pnpm env:check && pnpm storage:check",
@@ -39,7 +42,8 @@
     "telemetry:status": "pnpm --filter @imagine/local-observability status",
     "telemetry:traces": "pnpm --filter @imagine/local-observability traces",
     "telemetry:trace": "pnpm --filter @imagine/local-observability trace",
-    "telemetry:events": "pnpm --filter @imagine/local-observability events"
+    "telemetry:events": "pnpm --filter @imagine/local-observability events",
+    "deadcode": "knip && knip --production"
   },
   "devDependencies": {
     "@biomejs/biome": "latest",
@@ -49,6 +53,7 @@
     "@vitest/coverage-v8": "^4.1.10",
     "dotenv-cli": "latest",
     "effect": "4.0.0-rc.112",
+    "knip": "^6.34.0",
     "oxlint": "1.81.0",
     "tsx": "latest",
     "turbo": "^2.9.18",

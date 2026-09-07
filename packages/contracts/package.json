@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/api.ts",
     "./models": "./src/models.ts",
-    "./errors": "./src/errors.ts"
+    "./errors": "./src/errors.ts",
+    "./planning": "./src/planning.ts"
   },
   "dependencies": {
     "effect": "4.0.0-rc.112"

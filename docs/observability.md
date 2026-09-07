@@ -23,6 +23,8 @@ HTTP requests establish a root span and accept W3C trace context. Named Effect o
 
 Worker spans/logs include `book.id`, `job.id`, `job.kind` and `job.attempt`. Error spans identify the failed operation even when the worker handles the failure and schedules a retry. Counters `imagine.jobs.completed` and `imagine.jobs.failed_attempts` expose processing outcomes. Prometheus exposes their monotonic totals as `imagine_jobs_completed_total` and `imagine_jobs_failed_attempts_total`.
 
+The workflow exposes `ExtractBook.execute`, `EstablishArtDirection.execute`, `PlanReadingWindow.execute`, and `RenderIllustration.execute`. Planning also contains `PlanningWindow` and `CharacterMemory` spans. Both `AI.artDirection` and `AI.plan` invoke structured generation.
+
 Effect AI's `LanguageModel.generateObject` span includes OpenAI model, response ID and input/output token usage, with a child HTTP span. Image generation has `AI.render`, model/operation attributes and a child HTTP request. The installed Effect OpenAI package uses the Responses API for language models; image generation uses Effect HttpClient against the image endpoint.
 
 Instrumentation does not add document bodies, prompts or credentials as attributes. HTTP metadata, SQL statement templates and error details are collected. Restrict access and retention as you would other application diagnostics.

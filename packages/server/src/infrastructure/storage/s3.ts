@@ -1,3 +1,4 @@
+import { storageFailure } from "./failure";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -5,7 +6,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { Effect, Layer, Redacted } from "effect";
+import { Effect, Layer, Redacted, Schema, Stream } from "effect";
 import { BlobStorage } from "../../data/ports";
 import { StorageError } from "../../domain/errors";
 import { AppConfig } from "../config";
@@ -49,40 +50,106 @@ export const StorageLive = Layer.effect(
               }),
               { abortSignal: signal },
             ),
-          catch: (cause) => new StorageError({ operation: "put", cause }),
+          catch: storageFailure("put"),
         }).pipe(Effect.asVoid),
       ),
-      get: Effect.fn("Storage.get")(function* (key) {
-        const response = yield* Effect.tryPromise({
-          try: (signal) =>
-            client.send(new GetObjectCommand({ Bucket: storage.bucket, Key: key }), {
-              abortSignal: signal,
+      get: Effect.fn("Storage.get")((key) =>
+        Effect.scoped(
+          Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              const stream = yield* Effect.acquireRelease(
+                Effect.gen(function* () {
+                  const response = yield* restore(
+                    Effect.tryPromise({
+                      try: (signal) =>
+                        client.send(new GetObjectCommand({ Bucket: storage.bucket, Key: key }), {
+                          abortSignal: signal,
+                        }),
+                      catch: storageFailure("get"),
+                    }),
+                  );
+
+                  const body = response.Body;
+
+                  if (!body)
+                    return yield* new StorageError({
+                      operation: "get",
+                      cause: "Missing body",
+                      reason: "invalid-response",
+                      retryable: true,
+                    });
+
+                  return yield* Effect.try({
+                    try: () => body.transformToWebStream(),
+                    catch: storageFailure("read"),
+                  });
+                }),
+                (stream) =>
+                  Effect.tryPromise({
+                    try: () => stream.cancel(),
+                    catch: storageFailure("close"),
+                  }).pipe(
+                    Effect.interruptible,
+                    Effect.timeout("5 seconds"),
+                    Effect.catchCause((cause) =>
+                      Effect.logWarning("S3 body cleanup failed", cause),
+                    ),
+                  ),
+              );
+
+              const chunks = yield* restore(
+                Stream.fromReadableStream({
+                  evaluate: () => stream,
+                  onError: storageFailure("read"),
+                  releaseLockOnEnd: true,
+                }).pipe(
+                  Stream.mapEffect((chunk) =>
+                    Schema.decodeUnknownEffect(Schema.Uint8Array)(chunk).pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new StorageError({
+                            operation: "read",
+                            cause,
+                            reason: "invalid-response",
+                            retryable: true,
+                          }),
+                      ),
+                    ),
+                  ),
+                  Stream.runCollect,
+                  Effect.timeout("30 seconds"),
+                  Effect.catchTag("TimeoutError", (cause) =>
+                    Effect.fail(storageFailure("read")(cause)),
+                  ),
+                ),
+              );
+
+              const bytes = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
+              let offset = 0;
+
+              for (const chunk of chunks) {
+                bytes.set(chunk, offset);
+                offset += chunk.length;
+              }
+
+              return bytes;
             }),
-          catch: (cause) => new StorageError({ operation: "get", cause }),
-        });
-
-        const body = response.Body;
-
-        if (!body) return yield* new StorageError({ operation: "get", cause: "Missing body" });
-
-        return yield* Effect.tryPromise({
-          try: () => body.transformToByteArray(),
-          catch: (cause) => new StorageError({ operation: "read", cause }),
-        });
-      }),
+          ),
+        ),
+      ),
       remove: Effect.fn("Storage.remove")((key) =>
         Effect.tryPromise({
           try: (signal) =>
             client.send(new DeleteObjectCommand({ Bucket: storage.bucket, Key: key }), {
               abortSignal: signal,
             }),
-          catch: (cause) => new StorageError({ operation: "remove", cause }),
+          catch: storageFailure("remove"),
         }).pipe(Effect.asVoid),
       ),
       check: Effect.tryPromise({
         try: (signal) =>
           client.send(new HeadBucketCommand({ Bucket: storage.bucket }), { abortSignal: signal }),
-        catch: (cause) => new StorageError({ operation: "check bucket", cause }),
+        catch: storageFailure("check bucket"),
       }).pipe(Effect.asVoid),
     });
   }),

@@ -1,5 +1,5 @@
 import { InvalidInput } from "@imagine/contracts/errors";
-import type { Passage } from "@imagine/contracts/models";
+import type { BookPage } from "@imagine/contracts/planning";
 import { Effect, Layer } from "effect";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { Extractor } from "../data/ports";
@@ -26,7 +26,7 @@ export const PdfLive = Layer.succeed(
           if (pdf.numPages > 2000)
             return yield* new InvalidInput({ message: "PDF limit is 2,000 pages." });
 
-          const passages: Passage[] = [];
+          const pages: BookPage[] = [];
 
           let total = 0;
 
@@ -51,12 +51,7 @@ export const PdfLive = Layer.succeed(
             if (text.length > 24000 || total > 5_000_000)
               return yield* new InvalidInput({ message: "PDF exceeds the supported text budget." });
 
-            for (let offset = 0; offset < text.length; offset += 2000)
-              passages.push({
-                id: `p${page}-${offset / 2000}`,
-                page,
-                text: text.slice(offset, offset + 2000),
-              });
+            pages.push({ page, text });
           }
 
           if (total < 20)
@@ -64,7 +59,7 @@ export const PdfLive = Layer.succeed(
               message: "No readable text found. Scanned PDFs require OCR.",
             });
 
-          return { passages, pageCount: pdf.numPages };
+          return { pages, pageCount: pdf.numPages };
         }),
       ),
     ),

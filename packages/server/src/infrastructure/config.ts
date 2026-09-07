@@ -19,7 +19,7 @@ export const databaseConfig = Config.all({
   url: url("DATABASE_URL", ["postgres:", "postgresql:"]),
 });
 
-export const storageConfig = Config.all({
+const storageConfig = Config.all({
   bucket: Config.schema(Schema.NonEmptyString, "S3_BUCKET"),
   endpoint: text("S3_ENDPOINT", ""),
   region: text("S3_REGION", "us-east-1"),
@@ -29,7 +29,7 @@ export const storageConfig = Config.all({
   sessionToken: secret("AWS_SESSION_TOKEN"),
 });
 
-export const appConfig = Config.all({
+const appConfig = Config.all({
   database: databaseConfig,
   storage: storageConfig,
   origin: url("BETTER_AUTH_URL", ["http:", "https:"]),
@@ -55,10 +55,9 @@ export const appConfig = Config.all({
   ).pipe(Config.withDefault(3000)),
 });
 
-export class ConfigurationError extends Schema.TaggedError<ConfigurationError>()(
-  "ConfigurationError",
-  { message: Schema.String },
-) {}
+class ConfigurationError extends Schema.TaggedError<ConfigurationError>()("ConfigurationError", {
+  message: Schema.String,
+}) {}
 
 export const loadConfig = Effect.gen(function* () {
   const value = yield* appConfig;

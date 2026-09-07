@@ -1,3 +1,4 @@
+import { BookWorkflow } from "../domain/book-workflow";
 import { Effect, Layer } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
@@ -112,15 +113,19 @@ export const BooksHandlers = HttpApiBuilder.group(
 
         const book = yield* library.owned(reader.id, params.id).pipe(Effect.mapError(publicError));
 
+        const jobs = yield* library.jobs(reader.id, params.id).pipe(Effect.mapError(publicError));
+
         return {
           config: book.config,
           batches: book.batches,
-          passages: book.passages.filter(
-            (p) =>
-              book.illustrations.some((i) => i.sourcePassageIds.includes(p.id)) ||
-              book.checkpoint.facts.some((f) => f.sourcePassageIds.includes(p.id)),
+          artDirection: book.artDirection,
+          characters: book.characters,
+          summary: book.summary,
+          pages: book.pages.filter((page) =>
+            book.illustrations.some((image) => image.sourcePages.includes(page.page)),
           ),
-          jobs: yield* library.jobs(reader.id, params.id).pipe(Effect.mapError(publicError)),
+          jobs,
+          workflow: BookWorkflow.describe(book, jobs),
         };
       }),
       file: Effect.fn(function* ({ params }) {
