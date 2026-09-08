@@ -57,7 +57,7 @@ Planning receives `start`, exclusive `end`, total `pageCount`, numbered `pages`,
 }
 ```
 
-`sourcePages` references physical PDF page numbers supplied in this window. `untilPage` is exclusive. The application reveals a scene on `max(sourcePages) + 1`, assigns its persistent ID, inserts blank intervals, and freezes the full image prompt with art direction and the appropriate character snapshots. The model does not allocate IDs or construct an exhaustive timeline. Zero scenes and zero character updates are valid.
+`sourcePages` references physical PDF page numbers supplied in this window. `untilPage` is exclusive. The application reveals a scene on `max(sourcePages)`, assigns its persistent ID, inserts blank intervals, and freezes the full image prompt with art direction and the appropriate character snapshots. The model does not allocate IDs or construct an exhaustive timeline. Zero scenes and zero character updates are valid.
 
 `PlanningWindow.open` owns the input budget. `PlanningWindow.compile` checks source membership, chronology, non-overlap and character availability, then constructs the saved plan. Effect Schema decodes the external response before these relational rules run. Structural validation cannot prove that prose contains no hallucinations or spoilers; review generated scenes against the book when assessing model quality.
 

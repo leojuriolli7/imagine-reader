@@ -7,17 +7,17 @@ import { Button } from "@workspace/ui/components/button";
 import { Input } from "@workspace/ui/components/input";
 import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import dynamic from "next/dynamic";
-import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { mutations, queries } from "@/lib/api";
-import { ThemeMenu } from "./theme-menu";
 import { currentImage, validPage } from "@/lib/reading";
+import { IllustrationViewer } from "./illustration-viewer";
+import { ThemeMenu } from "./theme-menu";
 
 const PdfPage = dynamic(() => import("./pdf-page"), { ssr: false });
 
-export function Reader({ initial }: { initial: BookView }) {
+export function Reader({ initial, devMode }: { initial: BookView; devMode: boolean }) {
   const client = useQueryClient();
 
   const bookQuery = useQuery({
@@ -130,10 +130,12 @@ export function Reader({ initial }: { initial: BookView }) {
             <h1 className="max-w-80 truncate font-serif text-xl">{book.title}</h1>
           </div>
         </div>
+
         <div className="flex items-center gap-3">
-          {process.env.NODE_ENV === "development" && (
+          {devMode && (
             <div className="flex items-center gap-3">
               {book.mode === "demo" && <Badge variant="secondary">Demo mode</Badge>}
+
               <Link
                 className="text-xs text-muted-foreground underline"
                 href={`/api/books/${book.id}/inspect`}
@@ -143,9 +145,11 @@ export function Reader({ initial }: { initial: BookView }) {
               </Link>
             </div>
           )}
+
           <ThemeMenu />
         </div>
       </header>
+
       <main className="relative mx-auto flex w-full max-w-[792px] flex-1 flex-col gap-6 px-4 py-6 min-[1440px]:max-w-[672px]">
         <section className="min-w-0 flex-1">
           <nav className="mb-5 flex items-center justify-center gap-3" aria-label="Page navigation">
@@ -158,6 +162,7 @@ export function Reader({ initial }: { initial: BookView }) {
             >
               <ChevronLeft />
             </Button>
+
             <label htmlFor="reader-page" className="flex items-center gap-2 text-sm">
               Page
               <Input
@@ -186,25 +191,21 @@ export function Reader({ initial }: { initial: BookView }) {
             <PdfPage id={book.id} page={page} onLoaded={onLoaded} />
           </div>
         </section>
+
         {image && (
           <aside
             aria-label="Scene illustration"
-            className="w-full min-[1440px]:absolute min-[1440px]:left-full min-[1440px]:top-[84px] min-[1440px]:w-[min(360px,calc((100vw-672px)/2-24px))]"
+            className="w-full min-[1440px]:absolute min-[1440px]:left-full min-[1440px]:top-[84px] min-[1440px]:bottom-6 min-[1440px]:w-[min(360px,calc((100vw-672px)/2-24px))]"
           >
-            <div className="overflow-hidden rounded-xl border bg-background">
-              <Image
-                width={1024}
-                height={1024}
-                unoptimized
+            <div className="min-[1440px]:sticky min-[1440px]:top-6">
+              <IllustrationViewer
                 key={image.id}
                 src={`/api/books/${book.id}/images/${encodeURIComponent(image.id)}`}
-                alt="Illustration of the current scene in your book"
-                className="h-auto w-full"
               />
             </div>
           </aside>
         )}
-        {process.env.NODE_ENV === "development" && (
+        {devMode && (
           <div className="mt-5 space-y-3 text-xs text-muted-foreground" aria-live="polite">
             <p>
               {book.status === "extracting"
@@ -213,13 +214,16 @@ export function Reader({ initial }: { initial: BookView }) {
                   ? "Choosing an illustration style for this book…"
                   : `Planned through page ${book.plannedThrough} · reading ahead to ${book.targetThrough}`}
             </p>
+
             {retrying && <p>Processing hit a temporary problem. Retrying automatically…</p>}
+
             {book.artDirection && (
               <details>
                 <summary className="cursor-pointer">This book’s art direction</summary>
                 <p className="mt-2 leading-relaxed">{book.artDirection.style}</p>
               </details>
             )}
+
             {failed && (
               <div className="rounded-xl border bg-background p-4">
                 <p className="mb-3">
@@ -227,6 +231,7 @@ export function Reader({ initial }: { initial: BookView }) {
                 </p>
               </div>
             )}
+
             {error && <p role="alert">{error}</p>}
           </div>
         )}

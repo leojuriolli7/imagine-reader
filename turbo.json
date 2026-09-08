@@ -29,6 +29,7 @@
     "AWS_*",
     "PORT",
     "NODE_ENV",
+    "DEV_MODE",
     "OTEL_*"
   ]
 }

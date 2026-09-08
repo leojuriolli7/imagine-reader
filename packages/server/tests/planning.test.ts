@@ -12,10 +12,7 @@ it.effect("compiles page-based proposals into IDs, empty intervals and fixed vis
     const proposal = yield* Schema.decodeUnknownEffect(ReadingPlan)(readingPlan());
     const result = yield* window.compile(proposal);
 
-    assert.deepStrictEqual(result.spans, [
-      { start: 1, end: 2, illustrationId: null },
-      { start: 2, end: 9, illustrationId: "book:1:0" },
-    ]);
+    assert.deepStrictEqual(result.spans, [{ start: 1, end: 9, illustrationId: "book:1:0" }]);
     assert.include(result.illustrations[0]?.prompt ?? "", "Ink engraving");
     assert.include(result.illustrations[0]?.prompt ?? "", "Blue coat");
     assert.strictEqual(result.characters.length, 1);
@@ -82,7 +79,7 @@ it.effect("reuses stored characters in later windows without requiring copied fa
 
 it.effect.each([
   { sourcePages: [10], untilPage: 9, characters: [] },
-  { sourcePages: [1], untilPage: 2, characters: [] },
+  { sourcePages: [1], untilPage: 1, characters: [] },
   { sourcePages: [1], untilPage: 9, characters: ["Unknown person"] },
 ])("rejects invalid scene decisions %#", (scene) =>
   Effect.gen(function* () {
@@ -104,7 +101,10 @@ it.effect("carries a boundary scene without showing it before its sources", () =
       scenes: [{ prompt: "A quiet room", characters: [], sourcePages: [8], untilPage: 10 }],
     });
 
-    assert.deepStrictEqual(result.spans, [{ start: 1, end: 9, illustrationId: null }]);
+    assert.deepStrictEqual(result.spans, [
+      { start: 1, end: 8, illustrationId: null },
+      { start: 8, end: 9, illustrationId: "book:1:0" },
+    ]);
 
     const next = yield* PlanningWindow.open({ ...book, ...result, plannedThrough: 8 }, null);
     const carried = yield* next.compile({
@@ -189,7 +189,19 @@ it.effect("rejects future appearances, overlapping scenes and reveals beyond the
       })
       .pipe(Effect.flip);
 
-    assert.include(beyond.message, "final book page");
+    assert.include(beyond.message, "at most 9");
+
+    const finalScene = yield* finalWindow.compile({
+      ...proposal,
+      scenes: [{ prompt: "Final moment", sourcePages: [7, 8], untilPage: 9, characters: [] }],
+    });
+
+    assert.strictEqual(finalScene.illustrations[0]?.revealPage, 8);
+    assert.deepStrictEqual(finalScene.spans.at(-1), {
+      start: 8,
+      end: 9,
+      illustrationId: "book:1:0",
+    });
   }),
 );
 

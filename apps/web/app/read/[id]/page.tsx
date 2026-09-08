@@ -35,5 +35,5 @@ export default async function ReadPage({ params }: { params: Promise<{ id: strin
 
   if (data.status === "missing") notFound();
 
-  return <Reader initial={data.book} />;
+  return <Reader initial={data.book} devMode={process.env.DEV_MODE === "true"} />;
 }

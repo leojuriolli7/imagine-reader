@@ -61,13 +61,8 @@ export class PlanningWindow {
         message: `Scene ${index + 1}: sourcePages must come from supplied nonempty pages ${this.input.start}–${this.input.end - 1}. Received ${scene.sourcePages.join(", ")}.`,
       });
 
-    const revealPage = Math.max(...scene.sourcePages) + 1;
+    const revealPage = Math.max(...scene.sourcePages);
     const maximumEnd = Math.min(this.input.end + 1, this.book.pageCount + 1);
-
-    if (revealPage > this.book.pageCount)
-      return yield* new InvalidPlan({
-        message: `Scene ${index + 1} would reveal after the final book page. Omit it or choose an earlier moment supported entirely before page ${this.book.pageCount}.`,
-      });
 
     if (revealPage < cursor)
       return yield* new InvalidPlan({
@@ -76,7 +71,7 @@ export class PlanningWindow {
 
     if (scene.untilPage <= revealPage || scene.untilPage > maximumEnd)
       return yield* new InvalidPlan({
-        message: `Scene ${index + 1} reveals on page ${revealPage} (max sourcePages + 1). untilPage was ${scene.untilPage}; it must be greater than ${revealPage} and at most ${maximumEnd}. Omit a scene that has no display interval.`,
+        message: `Scene ${index + 1} reveals on page ${revealPage} (max sourcePages). untilPage was ${scene.untilPage}; it must be greater than ${revealPage} and at most ${maximumEnd}. Omit a scene that has no display interval.`,
       });
 
     return revealPage;
@@ -127,7 +122,7 @@ export class PlanningWindow {
 
     for (const [index, scene] of plan.scenes.entries()) {
       const revealPage = yield* this.validateScene(scene, index, cursor, pages);
-      const knownAfterPage = revealPage - 1;
+      const knownAfterPage = revealPage;
 
       const characters = yield* memory.resolve(scene.characters, knownAfterPage);
       const id = `${this.book.id}:${start}:${index}`;

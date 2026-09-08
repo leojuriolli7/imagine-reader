@@ -167,6 +167,6 @@ pnpm start:web
 pnpm start:worker
 ```
 
-Set `NODE_ENV=production`, the public `BETTER_AUTH_URL`, a random auth secret, service credentials and AI settings. Inject secrets through the hosting environment or an untracked `.env`. Terminate TLS at the proxy, preserve cookies and Origin, and allow PDF request bodies up to 25 MB. Back up PostgreSQL and S3 together.
+Set `DEV_MODE=false` to hide reader developer tools. This flag is independent of Next.js runtime mode. Set `NODE_ENV=production`, the public `BETTER_AUTH_URL`, a random auth secret, service credentials and AI settings. Inject secrets through the hosting environment or an untracked `.env`. Terminate TLS at the proxy, preserve cookies and Origin, and allow PDF request bodies up to 25 MB. Back up PostgreSQL and S3 together.
 
 Deploy the full workspace, lockfile, dependencies, server TypeScript sources and `apps/web/.next`. Startup uses `tsx` and `dotenv-cli`, so install the full locked dependency tree. `pnpm install` copies the PDF browser worker asset. `deploy:prepare` does not publish to a hosting account or apply migrations; run migrations once per release. The local S3 package and Mailpit do not run as part of the deployed API.

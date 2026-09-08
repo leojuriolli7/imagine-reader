@@ -14,7 +14,7 @@ export const demoDirection = (input: ArtDirectionInput): ArtDirection => ({
 });
 
 export const demoPlan = (input: PlanningInput): ReadingPlan => {
-  const source = input.pages.find((page) => page.text.length > 20 && page.page < input.end - 1);
+  const source = input.pages.find((page) => page.text.length > 20);
 
   return {
     scenes: source

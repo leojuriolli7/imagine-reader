@@ -22,6 +22,7 @@
 | `AWS_SESSION_TOKEN` | Optional session credential; requires static key pair |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional OTLP HTTP collector origin |
 | `OTEL_SERVICE_NAME` | Trace/log/metric service identity; defaults to `imagine-reader` |
+| `DEV_MODE` | Set to `true` to show reader developer tools; otherwise hidden. Read at runtime on the server and passed to the reader. |
 | `NODE_ENV` | development (default), test or production |
 | `PORT` | Web listener, default 3000 |
 
