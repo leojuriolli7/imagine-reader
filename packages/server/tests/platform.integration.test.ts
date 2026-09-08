@@ -9,6 +9,8 @@ import { Library } from "../src/data/library";
 import { Authenticator, BlobStorage, BookRepository, JobQueue } from "../src/data/ports";
 import { Worker } from "../src/data/worker";
 import { BookWorkflow } from "../src/domain/book-workflow";
+import { PlanningWindow } from "../src/domain/planning-window";
+import { readingPlan } from "./planning-fixture";
 import { TestApp, testEmail, testOwner } from "./support";
 
 layer(TestApp, { timeout: "30 seconds", excludeTestServices: true })("platform services", (it) => {
@@ -116,6 +118,56 @@ layer(TestApp, { timeout: "30 seconds", excludeTestServices: true })("platform s
         (yield* storage.get(book.storageKey).pipe(Effect.flip)).reason,
         "not-found",
       );
+    }),
+  );
+
+  it.effect("moves the render window after page jumps and restores skipped jobs on return", () =>
+    Effect.gen(function* () {
+      const library = yield* Library;
+      const repo = yield* BookRepository;
+      const sql = yield* PgClient.PgClient;
+      const book = yield* library.upload(
+        testOwner,
+        "Jump test",
+        new TextEncoder().encode("%PDF-test"),
+      );
+      const ready = {
+        ...book,
+        status: "ready" as const,
+        pageCount: 150,
+        targetThrough: 50,
+        artDirection: { title: null, author: null, setting: "Town", style: "Ink" },
+        pages: Array.from({ length: 150 }, (_, index) => ({
+          page: index + 1,
+          text: "A sailor enters a quiet room.",
+        })),
+      };
+      const plan = yield* (yield* PlanningWindow.open(ready, null)).compile(readingPlan());
+      yield* repo.change(book.id, () =>
+        Effect.succeed({ book: { ...ready, ...plan, plannedThrough: 8 }, jobs: [] }),
+      );
+      yield* library.progress(testOwner, book.id, 1);
+      assert.strictEqual(
+        (yield* sql`SELECT id FROM jobs WHERE book_id=${book.id} AND kind='render'`).length,
+        1,
+      );
+
+      yield* library.progress(testOwner, book.id, 70);
+      const jumped = yield* library.owned(testOwner, book.id);
+      assert.strictEqual(jumped.targetThrough, 119);
+      assert.strictEqual(jumped.plannedThrough, 8);
+      assert.strictEqual((yield* PlanningWindow.open(jumped, null)).input.start, 9);
+      assert.strictEqual(
+        (yield* sql`SELECT id FROM jobs WHERE book_id=${book.id} AND kind='render'`).length,
+        0,
+      );
+
+      yield* library.progress(testOwner, book.id, 3);
+      assert.strictEqual(
+        (yield* sql`SELECT id FROM jobs WHERE book_id=${book.id} AND kind='render'`).length,
+        1,
+      );
+      assert.strictEqual((yield* library.owned(testOwner, book.id)).targetThrough, 119);
     }),
   );
 

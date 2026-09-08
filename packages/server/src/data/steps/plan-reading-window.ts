@@ -55,7 +55,7 @@ export class PlanReadingWindow extends Context.Service<
                 ],
               };
 
-              return { book: updated, jobs: BookWorkflow.next(updated) };
+              return { book: updated, jobs: BookWorkflow.next(updated), reconcileRendering: true };
             }),
             job,
           );

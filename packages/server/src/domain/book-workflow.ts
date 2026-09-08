@@ -2,6 +2,8 @@ import type { Book, JobKind, JobSpec, JobStatus, WorkflowStage } from "@imagine/
 
 /** Durable graph: extraction → art direction → ordered planning → nearby rendering. */
 export class BookWorkflow {
+  static readonly renderAhead = 12;
+
   static readonly planningLane: readonly JobKind[] = ["extract", "art-direction", "plan"];
   static readonly renderingLane: readonly JobKind[] = ["render"];
 
@@ -55,7 +57,11 @@ export class BookWorkflow {
 
     const visible = new Set(
       book.spans
-        .filter((span) => span.end > book.currentPage && span.start <= book.currentPage + 12)
+        .filter(
+          (span) =>
+            span.end > book.currentPage &&
+            span.start <= book.currentPage + BookWorkflow.renderAhead,
+        )
         .map((span) => span.illustrationId),
     );
 

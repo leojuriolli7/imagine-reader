@@ -238,3 +238,40 @@ it("schedules art direction before planning and enables nearby rendering indepen
   );
   assert.deepStrictEqual(BookWorkflow.next({ ...book, status: "extracting" }), []);
 });
+
+it.effect.each([1, 10])(
+  "ignores invalid optional carry endpoints %s and keeps valid scenes",
+  (carryUntilPage) =>
+    Effect.gen(function* () {
+      const window = yield* PlanningWindow.open(planningBook(), null);
+      const result = yield* window.compile({ ...readingPlan(), carryUntilPage });
+
+      assert.strictEqual(result.illustrations.length, 1);
+      assert.deepStrictEqual(result.spans, [{ start: 1, end: 9, illustrationId: "book:1:0" }]);
+    }),
+);
+
+it.effect("drops an overlapping carry without weakening new-scene validation", () =>
+  Effect.gen(function* () {
+    const book = planningBook();
+    const first = yield* (yield* PlanningWindow.open(book, null)).compile(readingPlan());
+    const window = yield* PlanningWindow.open({ ...book, ...first, plannedThrough: 8 }, null);
+    const scene = { prompt: "A courtyard", sourcePages: [10], untilPage: 17, characters: [] };
+    const plan = {
+      scenes: [scene],
+      carryUntilPage: 12,
+      characterUpdates: [],
+      summary: "A courtyard",
+    };
+    const result = yield* window.compile(plan);
+
+    assert.deepStrictEqual(result.spans, [
+      { start: 9, end: 10, illustrationId: null },
+      { start: 10, end: 17, illustrationId: "book:9:0" },
+    ]);
+    const invalid = yield* window
+      .compile({ ...plan, scenes: [{ ...scene, sourcePages: [40] }] })
+      .pipe(Effect.flip);
+    assert.strictEqual(invalid._tag, "InvalidPlan");
+  }),
+);

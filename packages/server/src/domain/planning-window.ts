@@ -77,6 +77,41 @@ export class PlanningWindow {
     return revealPage;
   });
 
+  /** Carry-over is optional; malformed carry decisions must not block valid new scenes. */
+  private carry = Effect.fn("PlanningWindow.carry")(function* (
+    this: PlanningWindow,
+    plan: ReadingPlan,
+  ) {
+    if (plan.carryUntilPage === null) return null;
+
+    const { start, end } = this.input;
+    const active = this.book.illustrations.find(
+      (image) => image.id === this.book.activeIllustrationId,
+    );
+    const firstScene = plan.scenes[0];
+    const firstReveal = firstScene ? Math.max(...firstScene.sourcePages) : end;
+    const maximum = Math.min(end, firstReveal);
+
+    if (
+      !active ||
+      active.revealPage > start ||
+      plan.carryUntilPage <= start ||
+      plan.carryUntilPage > maximum
+    ) {
+      yield* Effect.logWarning("Discarded invalid illustration carry-over", {
+        bookId: this.book.id,
+        received: plan.carryUntilPage,
+        start,
+        maximum,
+        activeIllustrationId: active?.id ?? null,
+      });
+
+      return null;
+    }
+
+    return { start, end: plan.carryUntilPage, illustrationId: active.id };
+  });
+
   compile = Effect.fn("PlanningWindow.compile")(function* (
     this: PlanningWindow,
     plan: ReadingPlan,
@@ -101,23 +136,11 @@ export class PlanningWindow {
     const spans: Span[] = [];
     let cursor = start;
 
-    if (plan.carryUntilPage !== null) {
-      const active = this.book.illustrations.find(
-        (image) => image.id === this.book.activeIllustrationId,
-      );
+    const carry = yield* this.carry(plan);
 
-      if (
-        !active ||
-        active.revealPage > start ||
-        plan.carryUntilPage <= start ||
-        plan.carryUntilPage > end
-      )
-        return yield* new InvalidPlan({
-          message: "The carried scene must be available and end inside this window.",
-        });
-
-      spans.push({ start, end: plan.carryUntilPage, illustrationId: active.id });
-      cursor = plan.carryUntilPage;
+    if (carry) {
+      spans.push(carry);
+      cursor = carry.end;
     }
 
     for (const [index, scene] of plan.scenes.entries()) {
@@ -158,11 +181,7 @@ export class PlanningWindow {
 
     const last = illustrations.at(-1);
     const activeIllustrationId =
-      last && last.untilPage >= end
-        ? last.id
-        : plan.carryUntilPage === end
-          ? this.book.activeIllustrationId
-          : null;
+      last && last.untilPage >= end ? last.id : carry?.end === end ? carry.illustrationId : null;
 
     return {
       illustrations,

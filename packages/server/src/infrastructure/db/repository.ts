@@ -5,6 +5,7 @@ import { Crypto, Effect, Layer, Schema } from "effect";
 import { SqlError } from "effect/unstable/sql";
 import { BookRepository, JobQueue } from "../../data/ports";
 import { DatabaseError } from "../../domain/errors";
+import { BookWorkflow } from "../../domain/book-workflow";
 import { databaseFailure } from "./failure";
 
 const StateRow = Schema.Struct({ state: Book });
@@ -31,7 +32,7 @@ export const RepositoryLive = Layer.effect(
         specs,
         Effect.fn(function* (spec) {
           const id = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
-          return yield* sql`INSERT INTO jobs (id, key, book_id, kind, ref, priority, trace_context) VALUES (${id}, ${spec.key}, ${spec.bookId}, ${spec.kind}, ${spec.ref}, ${spec.priority}, ${trace ? sql.json(trace) : null}) ON CONFLICT (key) DO NOTHING`;
+          return yield* sql`INSERT INTO jobs (id, key, book_id, kind, ref, priority, trace_context) VALUES (${id}, ${spec.key}, ${spec.bookId}, ${spec.kind}, ${spec.ref}, ${spec.priority}, ${trace ? sql.json(trace) : null}) ON CONFLICT (key) DO UPDATE SET priority = EXCLUDED.priority WHERE jobs.status = 'queued'`;
         }),
       );
     });
@@ -119,6 +120,14 @@ export const RepositoryLive = Layer.effect(
 
               yield* sql`UPDATE books SET state = ${sql.json(change.book)} WHERE id = ${id}`;
 
+              if (change.reconcileRendering) {
+                const wanted = change.jobs
+                  .filter((job) => job.kind === "render")
+                  .map((job) => job.key);
+
+                yield* sql`DELETE FROM jobs WHERE book_id = ${id} AND kind = 'render' AND status IN ('queued', 'failed') AND NOT (key = ANY(${wanted}::text[]))`;
+              }
+
               yield* enqueue(change.jobs);
             }),
           )
@@ -159,7 +168,7 @@ export const QueueLive = Layer.effect(
               yield* sql`UPDATE jobs SET status = 'failed', error = 'Worker stopped during its final attempt.' WHERE status = 'running' AND lease_until <= clock_timestamp() AND attempts >= 3`;
 
               const rows =
-                yield* sql`WITH candidate AS (SELECT id FROM jobs WHERE kind IN ${sql.in(kinds)} AND available_at <= clock_timestamp() AND (status = 'queued' OR (status = 'running' AND lease_until <= clock_timestamp())) ORDER BY priority, created_at LIMIT 1 FOR UPDATE SKIP LOCKED) UPDATE jobs SET status = 'running', attempts = attempts + 1, token = ${yield* crypto.randomUUIDv4.pipe(Effect.orDie)}, lease_until = clock_timestamp() + interval '5 minutes', error = NULL FROM candidate WHERE jobs.id = candidate.id RETURNING jobs.id, jobs.key, jobs.book_id AS "bookId", jobs.kind, jobs.ref, jobs.priority, jobs.token, jobs.attempts, jobs.trace_context AS "traceContext", jobs.feedback`.pipe(
+                yield* sql`WITH candidate AS (SELECT jobs.id FROM jobs JOIN books b ON b.id = jobs.book_id WHERE b.deleted_at IS NULL AND kind IN ${sql.in(kinds)} AND (kind <> 'render' OR EXISTS (SELECT 1 FROM jsonb_array_elements(b.state->'spans') span WHERE span->>'illustrationId' = jobs.ref AND (span->>'end')::int > (b.state->>'currentPage')::int AND (span->>'start')::int <= (b.state->>'currentPage')::int + ${BookWorkflow.renderAhead})) AND available_at <= clock_timestamp() AND (status = 'queued' OR (status = 'running' AND lease_until <= clock_timestamp())) ORDER BY priority, jobs.created_at LIMIT 1 FOR UPDATE OF jobs SKIP LOCKED) UPDATE jobs SET status = 'running', attempts = attempts + 1, token = ${yield* crypto.randomUUIDv4.pipe(Effect.orDie)}, lease_until = clock_timestamp() + interval '5 minutes', error = NULL FROM candidate WHERE jobs.id = candidate.id RETURNING jobs.id, jobs.key, jobs.book_id AS "bookId", jobs.kind, jobs.ref, jobs.priority, jobs.token, jobs.attempts, jobs.trace_context AS "traceContext", jobs.feedback`.pipe(
                   Effect.flatMap(decodeJobs),
                 );
 

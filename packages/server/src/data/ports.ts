@@ -66,6 +66,8 @@ export class Illustrations extends Context.Service<
 >()("imagine/Illustrations") {}
 
 export interface Change {
+  /** Replace pending render eligibility atomically with this state change. Running jobs finish. */
+  readonly reconcileRendering?: boolean;
   readonly book: Book;
   readonly jobs: readonly JobSpec[];
 }

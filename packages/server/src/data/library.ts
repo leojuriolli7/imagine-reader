@@ -109,7 +109,7 @@ const library = Effect.gen(function* () {
           targetThrough: book.pageCount > 0 ? Math.min(book.pageCount, target) : target,
         };
 
-        return { book: updated, jobs: BookWorkflow.next(updated) };
+        return { book: updated, jobs: BookWorkflow.next(updated), reconcileRendering: true };
       }),
     );
   });
