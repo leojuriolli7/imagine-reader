@@ -127,7 +127,7 @@ export function Reader({ initial, devMode }: { initial: BookView; devMode: boole
             <ArrowLeft className="size-5" />
           </Link>
           <div>
-            <h1 className="max-w-80 truncate font-serif text-xl">{book.title}</h1>
+            <h1 className="max-w-115 truncate font-serif text-xl">{book.title}</h1>
           </div>
         </div>
 
