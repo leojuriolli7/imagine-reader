@@ -1,6 +1,9 @@
 # ImagineReader
 
-https://github.com/user-attachments/assets/a9b2467d-97b2-4867-9d68-537294fa89f
+
+
+https://github.com/user-attachments/assets/9aa2ee1f-b6bd-4ef6-935b-b6aab9b239ba
+
 
 
 A private PDF reader that plans illustrations ahead of your reading position. Open a book while the worker extracts its text, establishes its art direction, plans the next fifty pages, and generates nearby scenes.
