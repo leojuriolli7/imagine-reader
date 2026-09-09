@@ -1,5 +1,8 @@
 # ImagineReader
 
+https://github.com/user-attachments/assets/a9b2467d-97b2-4867-9d68-537294fa89f
+
+
 A private PDF reader that plans illustrations ahead of your reading position. Open a book while the worker extracts its text, establishes its art direction, plans the next fifty pages, and generates nearby scenes.
 
 Built with Next.js, shadcn, React Query, Effect 4, Effect SQL/PostgreSQL, Better Auth, and S3. Shared Effect Schema contracts generate the HTTP client and OpenAPI description.
@@ -18,7 +21,7 @@ pnpm local:up
 | Service | Address |
 | --- | --- |
 | Web | http://localhost:3000 |
-| OpenAPI | http://localhost:3000/api/openapi.json |
+| OpenAPI | http://localhost:3000/api/openapi.json | 
 | Mail inbox | http://localhost:58025 |
 | SMTP | localhost:51025 |
 | PostgreSQL | localhost:55432 |
